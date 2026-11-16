@@ -477,7 +477,16 @@ load_profile_base() {
     lib=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
     [ -r "$lib" ] || die profile_unavailable
     . "$lib"
-    vward_profile_load >/dev/null 2>&1 || die profile_unavailable
+    # Why the profile did not load goes along (fix.39.2: the owner saw only «профиль устройства не
+    # определён», 15.11.2026): the library's own line, without its prefix.
+    lp_err=$(mktemp "${TMPDIR:-/tmp}/vward-profile.XXXXXX" 2>/dev/null) || lp_err=/dev/null
+    if ! vward_profile_load >/dev/null 2>"$lp_err"; then
+        lp_why=$(tail -n 1 "$lp_err" 2>/dev/null | sed 's/^VWARD device profile: //' | tr -d '\r' | cut -c1-160)
+        [ "$lp_err" = /dev/null ] || rm -f "$lp_err"
+        [ -z "$lp_why" ] || printf 'reason=%s\n' "$lp_why"
+        die profile_unavailable
+    fi
+    [ "$lp_err" = /dev/null ] || rm -f "$lp_err"
 }
 
 load_profile() {
@@ -2793,6 +2802,11 @@ op_service() {
         *) die invalid_operation 64 ;;
     esac
     SV_CAT=$(services_catalog) || die services_unavailable
+    # Off for a service that is not on: nothing to do, and nothing of the router is needed (fix.39.2:
+    # a Panel showing an old state sent «off» again and got «профиль устройства не определён»).
+    if [ "$sv_op" = off ] && [ -z "$(service_row "$sv_id")" ]; then
+        done_ok "service off $sv_id" unchanged
+    fi
     load_profile_base
     [ "$sv_to" = auto ] || [ "$sv_op" = off ] || [ "$sv_op" = reference ] || is_tunnel "$sv_to" || die unknown_tunnel 64
     service_pending_check

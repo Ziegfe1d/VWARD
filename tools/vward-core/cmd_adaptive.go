@@ -93,7 +93,7 @@ func (l *eventLog) put(event, host, why string) {
 
 type adaptiveFlags struct {
 	rciAddr, lan, wan, tunDev, group, jdir, logPath, dns string
-	ownedPath, shellPersist, observeIf, adsIf            string
+	ownedPath, shellPersist, observeIf, adsIf, hints     string
 	apply, reconcile                                     bool
 	workers, limit                                       int
 	batch, saveEvery, refresh, timeout, reconcileTick    time.Duration
@@ -113,6 +113,7 @@ func parseAdaptive(name string, args []string) (*adaptiveFlags, *flag.FlagSet) {
 	fs.BoolVar(&f.apply, "apply", false, "write into the group (without: observation, nothing sent)")
 	fs.StringVar(&f.observeIf, "observe-if", "", "files, comma-separated: while one of them exists nothing is written (Autopodbor switched off in the Panel)")
 	fs.StringVar(&f.adsIf, "ads-sandbox-if", "", "file: while it exists adverts and counters are named in the journal (sandbox, nothing changes)")
+	fs.StringVar(&f.hints, "hints", "/opt/etc/vward/route-engine/hints-catalog.tsv", "the domain sources of blocked sites (itdog, Re:filter, antifilter; v2fly left out); empty: none")
 	fs.BoolVar(&f.reconcile, "reconcile", true, "take names out again once they open directly (3 checks in a row)")
 	fs.StringVar(&f.ownedPath, "owned", "/opt/var/lib/vward/core-adaptive/owned.json", "the names Autopodbor added itself")
 	fs.StringVar(&f.shellPersist, "shell-persist", "/opt/var/lib/vward/route-engine/adaptive-persist.txt", "the shell engine's list, taken over once")
@@ -144,6 +145,13 @@ func checkHost(args []string) {
 		e.SetConfig(m)
 	} else {
 		fmt.Printf("ROUTER=UNREAD\tWHY=%v\n", err)
+	}
+	if f.hints != "" {
+		hs := &adaptive.Hints{Path: f.hints}
+		if _, err := hs.Reload(); err == nil {
+			e.SetHints(hs.Set())
+			fmt.Printf("HINTS=%d\n", hs.Len())
+		}
 	}
 	t0 := time.Now()
 	res := e.Check(context.Background(), fs.Arg(0))
@@ -236,6 +244,24 @@ func runAdaptive(args []string) {
 		}
 		return out
 	}
+	// The names of the domain sources: read at start and again when the nightly update rewrote
+	// the file (looked at with every reread of the router's groups).
+	hs := &adaptive.Hints{Path: f.hints}
+	reloadHints := func() {
+		if f.hints == "" {
+			return
+		}
+		changed, err := hs.Reload()
+		if err != nil {
+			log.put("HINTS_UNREAD", f.hints, err.Error())
+			return
+		}
+		if changed {
+			e.SetHints(hs.Set())
+			log.put("HINTS", "-", fmt.Sprintf("names=%d", hs.Len()))
+		}
+	}
+	reloadHints()
 	refresh := func() bool {
 		m, err := r.Read([]string{"groups", "routes", "doh"})
 		if err != nil {
@@ -323,6 +349,10 @@ func runAdaptive(args []string) {
 
 	var mu sync.Mutex
 	pending := map[string]string{} // the name -> why it did not open directly
+	// A name found while no write happened for a batch's time is written at once (fix.39.2: the
+	// first blocked site waited up to 10 s for the ticker); the ones that follow within the batch
+	// time go together, as before - at most one write a batch time.
+	kick := make(chan struct{}, 1)
 	// An hour's summary (owner 12.11.2026): whether Autopodbor works at all is seen in the journal
 	// even when nothing changes - names seen, checked, and how the checks ended.
 	stats := map[string]int{}
@@ -357,6 +387,10 @@ func runAdaptive(args []string) {
 					}
 					if res.Outcome == adaptive.Add {
 						pending[res.Host] = res.Direct
+						select {
+						case kick <- struct{}{}:
+						default:
+						}
 					}
 					if len(last) > 4096 {
 						last = map[string]adaptive.Outcome{}
@@ -480,6 +514,61 @@ func runAdaptive(args []string) {
 			s[string(adaptive.TunnelFail)]+s[string(adaptive.TunnelUnstable)], s[string(adaptive.ProbeUnknown)],
 			s[string(adaptive.ISPUnreliable)], s["added"], s["removed"], s["write_failed"], n, f.limit, owns, s["dropped"], s["ads_would_skip"]))
 	}
+	var lastBatch time.Time
+	runBatch := func() {
+		mu.Lock()
+		var hosts []string
+		why := pending
+		for h := range pending {
+			hosts = append(hosts, h)
+		}
+		pending = map[string]string{}
+		mu.Unlock()
+		omu.Lock()
+		syncMode()
+		syncAds()
+		if len(hosts) > 0 {
+			lastBatch = time.Now()
+			b, err := w.Add(hosts, time.Now())
+			switch {
+			case err != nil:
+				count("write_failed", 1)
+				log.put("ADD_FAILED", strings.Join(hosts, ","), err.Error())
+				for _, h := range hosts {
+					e.Forget(h)
+				}
+			case b != nil:
+				count("added", len(b.Added))
+				for _, h := range b.Added {
+					log.put("ADDED", h, f.group)
+					owned.Names[h] = &adaptive.Name{Added: time.Now(), Why: why[h]}
+				}
+				if len(b.Added) > 0 {
+					owned.Mark(ads.Load())
+					if err := owned.Save(); err != nil {
+						log.put("OWNED_UNSAVED", f.ownedPath, err.Error())
+					}
+				}
+				for _, h := range b.Would {
+					log.put("WOULD_ADD", h, f.group)
+				}
+				if len(b.Added) == 0 && len(b.Would) == 0 && b.Why != "" {
+					log.put("ADD_SKIPPED", strings.Join(hosts, ","), b.Why)
+				}
+			}
+		}
+		saved, ferr := w.Flush(time.Now(), false)
+		added := len(hosts) > 0
+		omu.Unlock()
+		if added {
+			refresh()
+		}
+		if ferr != nil {
+			log.put("SAVE_FAILED", "-", ferr.Error())
+		} else if saved {
+			log.put("SAVED", "-", "")
+		}
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -500,61 +589,16 @@ func runAdaptive(args []string) {
 			return
 		case <-reread.C:
 			refresh()
+			reloadHints()
 			e.Prune()
 			log.flush()
 		case <-hourly.C:
 			summary()
 		case <-batch.C:
-			mu.Lock()
-			var hosts []string
-			why := pending
-			for h := range pending {
-				hosts = append(hosts, h)
-			}
-			pending = map[string]string{}
-			mu.Unlock()
-			omu.Lock()
-			syncMode()
-			syncAds()
-			if len(hosts) > 0 {
-				b, err := w.Add(hosts, time.Now())
-				switch {
-				case err != nil:
-					count("write_failed", 1)
-					log.put("ADD_FAILED", strings.Join(hosts, ","), err.Error())
-					for _, h := range hosts {
-						e.Forget(h)
-					}
-				case b != nil:
-					count("added", len(b.Added))
-					for _, h := range b.Added {
-						log.put("ADDED", h, f.group)
-						owned.Names[h] = &adaptive.Name{Added: time.Now(), Why: why[h]}
-					}
-					if len(b.Added) > 0 {
-						owned.Mark(ads.Load())
-						if err := owned.Save(); err != nil {
-							log.put("OWNED_UNSAVED", f.ownedPath, err.Error())
-						}
-					}
-					for _, h := range b.Would {
-						log.put("WOULD_ADD", h, f.group)
-					}
-					if len(b.Added) == 0 && len(b.Would) == 0 && b.Why != "" {
-						log.put("ADD_SKIPPED", strings.Join(hosts, ","), b.Why)
-					}
-				}
-			}
-			saved, ferr := w.Flush(time.Now(), false)
-			added := len(hosts) > 0
-			omu.Unlock()
-			if added {
-				refresh()
-			}
-			if ferr != nil {
-				log.put("SAVE_FAILED", "-", ferr.Error())
-			} else if saved {
-				log.put("SAVED", "-", "")
+			runBatch()
+		case <-kick:
+			if writeNow(lastBatch, time.Now(), f.batch) {
+				runBatch()
 			}
 		}
 	}
@@ -646,4 +690,10 @@ func someNames(names []string, max int) string {
 		names = names[:max]
 	}
 	return ": " + strings.Join(names, ", ") + more
+}
+
+// writeNow: a name found now is written at once when the last write was a batch time ago or
+// more (or never); else it waits for the ticker with the names that follow.
+func writeNow(last, now time.Time, every time.Duration) bool {
+	return last.IsZero() || now.Sub(last) >= every
 }

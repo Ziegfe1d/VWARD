@@ -309,7 +309,11 @@ const API_ERRORS = {
   temporary_file_failed: 'нет места для временного файла', session_failed: 'не удалось начать сеанс', stability_unavailable: 'данные стабильности недоступны', admission_unavailable: 'роутер занят, повторите позже'
 };
 // The router's answer to a refused command; for a file, the settings it holds that nobody knows.
-const errText = x => errBase(x) + (x && x.reason ? (x.error === 'conf_unknown_setting' ? ': ' + x.reason.split(',').join(', ') : ' (ответ роутера: ' + x.reason + ')') : '');
+const errText = x => errBase(x) + (x && x.reason ? (x.error === 'conf_unknown_setting' ? ': ' + x.reason.split(',').join(', ') : x.error === 'profile_unavailable' ? ': ' + profileWhy(x.reason) : ' (ответ роутера: ' + x.reason + ')') : '');
+// Why the device profile did not load (the library's words, fix.39.2), in the Panel's words.
+const PROFILE_WHY = [[/tunnel device|tunnel interface/, 'не найден туннель VPN'], [/WAN device/, 'не найдено подключение к провайдеру'],
+  [/LAN (address|subnet)/, 'не найден адрес домашней сети'], [/device\.conf/, 'файл device.conf недоступен или с чужими правами'], [/AdGuard/, 'настройки AdGuard Home не читаются'], [/DNS server/, 'не задан DNS роутера']];
+const profileWhy = r => (PROFILE_WHY.find(p => p[0].test(r)) || [0, r])[1];
 const errBase = x => API_ERRORS[x && x.error] || (x && /^conf_rejected_/.test(x.error || '') ? 'роутер не принял настройку ' + x.error.slice(14).replace(/_/g, ' ') + ' - туннель не изменён' : '') || (x && x.error) || (x && x.rc != null ? 'код ' + x.rc : 'роутер ответил без данных');
 
 /* ---------- Данные ---------- */
@@ -3146,7 +3150,8 @@ const AD_EV = {
 // Why a name did not open directly (the core's words «connect: timeout», «tls: reset», «http 451»).
 function adWhy(w) {
   w = String(w || '');
-  return /451/.test(w) ? 'сайт закрыт по требованию (451)' : /region/.test(w) ? 'сайт не работает в этом регионе' : /timeout/.test(w) ? 'нет ответа' :
+  return /451/.test(w) ? 'сайт закрыт по требованию (451)' : /region/.test(w) ? 'сайт не работает в этом регионе' :
+    /\bstall\b/.test(w) ? 'напрямую обрыв после первых КБ (блокировка «16 КБ»), через VPN целиком' : /wrong-cert/.test(w) ? 'напрямую чужой сертификат (заглушка провайдера), через VPN настоящий' : /403 refused/.test(w) ? 'сайт отказывает отсюда (403), через VPN отвечает' : /timeout/.test(w) ? 'нет ответа' :
     /reset/.test(w) ? 'соединение сброшено' : /refused/.test(w) ? 'соединение отклонено' : /closed|EOF/.test(w) ? 'соединение закрыто' : '';
 }
 function adFeedParse(text) {
@@ -4113,12 +4118,15 @@ async function bgJob(fields, minutes) {
 }
 // Switching on writes up to 300 domains into Keenetic: a background job, as for tunnels.
 async function serviceJob(fields, okMsg) {
-  const show = text => { actionResult = { id: 'svc', text: text }; render(); };
-  SVC.busy = true; show(fields.op === 'off' ? 'Выключаем…' : fields.op === 'on' ? 'Записываем домены в Keenetic…' : 'Переводим…');
+  // The step in progress and its result are notices at the bottom, as «Роутер отвечает медленно»
+  // (owner 15.11.2026): no line under the switch that stays after the switch has changed.
+  const gone = popup({ sev: 'info', stay: true, title: fields.op === 'off' ? 'Выключаем…' : fields.op === 'on' ? 'Записываем домены в Keenetic…' : 'Переводим…' });
+  SVC.busy = true; if (actionResult && actionResult.id === 'svc') actionResult = null; render();
   const j = await bgJob(fields);
   SVC.busy = false; SVREC_ACTION = !j.ok && j.done;
-  show(j.ok ? okMsg : !j.done ? 'Ещё выполняется, проверьте позже' : 'Не выполнено: ' + errText(j.x));
+  if (gone) gone();
   await Promise.all([load('services', true), load('lists', true)]); render();
+  toast(j.ok ? (j.x.result === 'unchanged' ? 'Уже так: ' + okMsg : okMsg) : !j.done ? 'Ещё выполняется, проверьте позже' : 'Не выполнено: ' + errText(j.x), j.ok ? 'ok' : !j.done ? 'warn' : 'err', actKey(fields));
 }
 // The default tunnel: moving every list can take Keenetic a minute, so it is a background
 // job (fix.30 showed «роутер не ответил» after 20 s while the switch went on).
@@ -5113,6 +5121,7 @@ function popup(n) {
     setTimeout(() => { moved = false; }, 0);
   };
   el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+  return gone;
 }
 // Kept on the router; the bell shows it at once, before the router answers.
 function noteKeep(n, quiet) {

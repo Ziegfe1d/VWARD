@@ -4,6 +4,7 @@ import (
 	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/Ziegfe1d/VWARD/tools/vward-core/internal/adaptive"
 )
@@ -76,5 +77,20 @@ func TestModeFiles(t *testing.T) {
 	}
 	if someNames(nil, 3) != "" || someNames([]string{"a", "b", "c", "d"}, 3) != ": a, b, c and 1 more" {
 		t.Fatalf("names: %q", someNames([]string{"a", "b", "c", "d"}, 3))
+	}
+}
+
+// fix.39.2: the first blocked site is written at once, not up to 10 s later; then at most one
+// write a batch time, as before.
+func TestWriteNow(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	if !writeNow(time.Time{}, t0, 10*time.Second) {
+		t.Fatal("never written: at once")
+	}
+	if writeNow(t0, t0.Add(3*time.Second), 10*time.Second) {
+		t.Fatal("3 s after a write: wait for the ticker")
+	}
+	if !writeNow(t0, t0.Add(10*time.Second), 10*time.Second) {
+		t.Fatal("a batch time after a write: at once")
 	}
 }
