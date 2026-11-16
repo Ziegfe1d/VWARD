@@ -1092,7 +1092,7 @@ SOFTWARE.</pre></details>
     var group=null,rows=0;known=known||[];
     each(known,function(part){if(!part||!part.id||hidden.indexOf(part.id)!==-1||part.kind==='retired')return;
       var path=dynamicComponentRoutes[part.id];if(!path)return;
-      if(!group){group=document.createElement('details');group.className='dir-group';
+      if(!group){group=document.createElement('details');group.className='dir-group';group.open=wasOpen;
         var summary=document.createElement('summary');summary.textContent='Страницы компонентов (из API)';group.appendChild(summary);
         var box=document.createElement('div');box.className='dir-links';group.appendChild(box);root.appendChild(group);}
       var a=document.createElement('a'),span=document.createElement('span'),small=document.createElement('small');
