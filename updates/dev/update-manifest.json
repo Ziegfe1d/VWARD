@@ -1,22 +1,22 @@
 {
   "signed": {
     "schema": 1,
-    "update_id": "vward-0.2.0-rc.2.fix.39.4",
-    "sequence": 2026111603,
-    "version": "0.2.0-rc.2.fix.39.4",
+    "update_id": "vward-0.2.0-rc.2.fix.39.5",
+    "sequence": 2026111701,
+    "version": "0.2.0-rc.2.fix.39.5",
     "channel": "dev",
     "priority": "ROUTINE",
-    "published_at": "2026-11-16T22:48:15Z",
+    "published_at": "2026-11-17T07:31:05Z",
     "min_updater_version": "1.2.0",
     "package": {
-      "url": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/packages/vward-0.2.0-rc.2.fix.39.4.tar.gz",
-      "sha256": "f16fb764365d2d401e70ef2c4be319e17bdee6e1a229741bcc435bafffc2f779",
-      "size": 711181,
-      "unpacked_size": 2487272
+      "url": "https://raw.githubusercontent.com/Ziegfe1d/VWARD/dev/updates/dev/packages/vward-0.2.0-rc.2.fix.39.5.tar.gz",
+      "sha256": "3cc34b2d1be7872ae646ec5adf39c9c97a737ff82c7c60dfcd1747c2365ab0fc",
+      "size": 711477,
+      "unpacked_size": 2487864
     },
     "compatibility": {
       "min_vward": "0.1.9-beta",
-      "max_vward": "0.2.0-rc.2.fix.39.4"
+      "max_vward": "0.2.0-rc.2.fix.39.5"
     },
     "affected_components": [
       "ads-privacy-guard",
@@ -40,5 +40,5 @@
       "key_id": "vward-prod-2026-01"
     }
   },
-  "signature": "ltpglzaSoW7Lxo16w0BBqJ8Bs1GwS1l7Yo4SkjBjLrimV0+CcAWY39xDoigi1qzDrBGWav5ZOR/XyM2dnNS6BA=="
+  "signature": "powHmWoXq2wAJtDeMxL6l+/wCDRUbn94gWT1cP7LbIgeqjMBr80HqPwuQk8kq50AQJLdEQmhW72yZtDDQxFEAA=="
 }
