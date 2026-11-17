@@ -84,6 +84,7 @@ python3 tests/repository/check-console-route-probe.py || fail "Panel address che
 python3 tests/repository/check-services-catalog.py || fail "Services catalog"
 python3 tests/repository/check-console-services.py || fail "Panel services"
 python3 tests/repository/check-service-ownership.py || fail "service ownership"
+python3 tests/repository/check-sandbox-switches.py || fail "sandbox switches: Выкл · Песочница · Вкл"
 python3 tests/repository/check-service-transactions.py || fail "service transactions"
 python3 tests/repository/check-service-faults.py || fail "service fault matrix"
 python3 tests/repository/check-service-recover.py || fail "fix.35.4 service-recover: an unfinished service operation is closed, given back or kept with its reason"

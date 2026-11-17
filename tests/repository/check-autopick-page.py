@@ -40,14 +40,14 @@ if o["hosts"].count("chatgpt.com") != 1 or "-" in o["hosts"]:
 if "возможно, реклама: не добавлен" not in o["html"] or "убран: возможно, реклама" not in o["html"]:
     fail("ads in words")
 # fix.39: the check through the VPN too, the sandbox «Реклама и счётчики», the core's marks.
-for need in ("choiceSlider('ad-ads', [['off', 'Выкл'], ['sandbox', 'Песочница']]", "adSandboxText(adNames.length, names.length)", "общее имя CDN",
+for need in ("choiceSlider('ad-ads', [['off', 'Выкл'], ['sandbox', 'Песочница'], ['on', 'Вкл', AD_ON_SOON]]", "adSandboxText(adNames.length, names.length)", "общее имя CDN",
              "реклама или счётчик", "не открывается и через VPN (", "['cdn', 'Общие имена CDN']", "adWhy(n.why)"):
     if need not in page:
         fail(f"page lacks {need!r}")
 if "if (key === 'ad-ads') { cfgSet({ op: 'adaptive-ads', value: v }" not in JS:
     fail("the sandbox slider saves adaptive-ads")
 # 16.11.2026 «Обход блокировки по имени»: Выкл · Песочница (sandbox by default), its summary beside it.
-if "choiceSlider('ad-dns', [['off', 'Выкл'], ['sandbox', 'Песочница']], dnsMode" not in page or "adDnsText()" not in page or \
+if "choiceSlider('ad-dns', [['off', 'Выкл'], ['sandbox', 'Песочница'], ['on', 'Вкл', AD_ON_SOON]], dnsMode" not in page or "adDnsText()" not in page or \
         "if (key === 'ad-dns') { cfgSet({ op: 'adaptive-dnsblock', value: v }" not in JS or "cfgRoute().adaptive_dnsblock === 'off' ? 'off' : 'sandbox'" not in JS:
     fail("the «blocked by name» sandbox slider and its summary")
 h2 = """const esc = s => String(s), dom = s => String(s), empty = s => '<empty>' + s + '</empty>', fmtInt = n => String(n), plural = (n, a, b, c) => n === 1 ? a : n < 5 ? b : c;
