@@ -2296,3 +2296,25 @@ tick, visibilitychange и refreshPage журналы не грузят. Исто
 | P-5 | 2026-10-24 | Claude-чат | Две фазы; перепроверка: стандарт v2.3.3, исправлен пункт 2 (`ACT|down` от агента), пороги `vward_busy`, пути как на роутере |
 | P-6 | 2026-10-24 | Claude-чат | Сокращён до инструкций; пакеты WP-A…F; критерии «готово»; журнал и данные вынесены в этот документ |
 | P-7 | 2026-10-30 | Claude-чат + Владелец | Данные DNS/Ozon/Lampa/Supercell, экономия лимитов/выбор модели, работа без лишнего согласования и публикация только после GO |
+
+### 16-17.11.2026 — [Claude Code] fix.39.4 опубликован в dev (sequence 2026111603), проверка публикации PASS
+
+- **Что вошло:** при включении сервиса, для которого уже есть список владельца (по названию или доменам), VWARD по-прежнему
+  его не меняет (`service_reference_only`), но говорит покрытие: Панель - «Список «…» уже есть: в нём N из M доменов
+  сервиса, путь: … Песочница: добавил бы K (…)», журнал Панели - «Песочница: сервис …: … сделал бы: добавить K …; список
+  не изменён». На роутер ничего не пишется. Тест RED -> GREEN: `check-service-ownership.py` (случай `adopt`).
+  Документы сессии: `docs/PANEL_SPEED_DIAG_2026-11-16.md`, `docs/DIAGNOSTICS_YOUTUBE_CHATGPT_2026-11-16.md`,
+  `docs/HANDOFF_2026-11-16.md`, задание следующему исполнителю `docs/TASK_SANDBOX_ON_2026-11-16.md`.
+- **Слияние:** PR #103 - squash `4495aa0` в `dev` (полный CI зелёный на `1401d1e`: repository-consistency, updater-tests,
+  resource-audit, routing-core-go).
+- **Публикация:** `build-dev-release.yml` № 43960989505 (workflow_dispatch, `dev`, sequence `2026111603`, ROUTINE,
+  `min_vward 0.1.9-beta`), с первой попытки, 2 ч 33 мин (раннер медленнее обычного: проверка репозитория 76 мин,
+  проверка подписанной ленты 76 мин); коммит `49e4ba3` «publish(dev): signed 2026111603 candidate».
+- **Проверка публикации (публичный `raw.githubusercontent.com/.../dev`, 17.11 ~00:20 UTC) - PASS:** подпись Ed25519
+  (`config/updater/update-public.pem`, `key_id vward-prod-2026-01`) верна у `updates/dev/update-manifest.json` (schema 1) и
+  `updates/dev/v2/manifest.json` (schema 2); в обоих sequence `2026111603`, версия `0.2.0-rc.2.fix.39.4`, канал `dev`,
+  ROUTINE; пакет `vward-0.2.0-rc.2.fix.39.4.tar.gz` - 711 181 байт, sha256
+  `f16fb764365d2d401e70ef2c4be319e17bdee6e1a229741bcc435bafffc2f779`, совпадает с манифестом; в пакете новые
+  `vward-console-config.sh` (`service_cover`) и `vward-console.js` (`info.cover`).
+- **Не проверено:** установка на роутере владельца. После обновления: включить YouTube в «Сервисы» - вместо «Не выполнено»
+  уведомление о списке `domain-list25` и строка «Песочница: …» в журнале Панели.

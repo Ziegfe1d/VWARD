@@ -2976,13 +2976,15 @@ const RENDER = {
     if (!ADV.feed && !ADV.busy && !ADV.tried) { ADV.tried = true; setTimeout(adFeedLoad, 0); }
     return cfgNote() +
       panel('Автоподбор доменов', '<dl class="kv">' + ctrlRow('Автоподбор доменов', sw('data-cfg-rt="adaptive-mode"', on, 'Автоподбор доменов', !cfgOk()), 'не открылся напрямую - идёт через VPN') +
-        // fix.39 (owner 13.11.2026, «сначала песочница»): «Выкл · Песочница»; «Вкл» - a later release.
-        ctrlRow('Реклама и счётчики мимо VPN', choiceSlider('ad-ads', [['off', 'Выкл'], ['sandbox', 'Песочница']], adsMode, 'Реклама и счётчики мимо VPN'),
+        // fix.39 (owner 13.11.2026, «сначала песочница»); fix.39.5 (owner 16.11.2026): «Выкл · Песочница · Вкл»
+        // always, «Вкл» inactive until the core can act (docs/TASK_SANDBOX_ON_2026-11-16.md).
+        ctrlRow('Реклама и счётчики мимо VPN', choiceSlider('ad-ads', [['off', 'Выкл'], ['sandbox', 'Песочница'], ['on', 'Вкл', AD_ON_SOON]], adsMode, 'Реклама и счётчики мимо VPN'),
           'рекламе и счётчикам VPN не нужен: страницы работают и без них', 'stack') +
         // 16.11.2026 (owner: «добьём маршрутизацию и DNS»): the provider's DNS says «no such name» - the
         // sandbox asks the name through the tunnel and checks it through the VPN; «Вкл» - after it.
-        ctrlRow('Обход блокировки по имени', choiceSlider('ad-dns', [['off', 'Выкл'], ['sandbox', 'Песочница']], dnsMode, 'Обход блокировки по имени'),
+        ctrlRow('Обход блокировки по имени', choiceSlider('ad-dns', [['off', 'Выкл'], ['sandbox', 'Песочница'], ['on', 'Вкл', AD_ON_SOON]], dnsMode, 'Обход блокировки по имени'),
           'провайдер отвечает «такого сайта нет»: имя спрашивается через туннель и проверяется через VPN', 'stack') + '</dl>' +
+        (AD_ON_SOON ? '<p class="panel-desc">«Вкл» станет доступно отдельным обновлением, после проверки Песочницы на этом роутере. Сейчас VWARD только считает и ничего не меняет.</p>' : '') +
         (adsMode === 'sandbox' ? '<p class="panel-desc">' + adSandboxText(adNames.length, names.length) + '</p>' : '') +
         (dnsMode === 'sandbox' ? '<p class="panel-desc">' + adDnsText() + '</p>' : '')) +
       panel('Сейчас', '<div id="adFeed">' + adFeedHtml() + '</div>' +
@@ -3621,6 +3623,8 @@ function probeResult() {
 // the backups, owner 16.11.2026).
 // OPTS: [value, label, disabled]; a click goes to segPick(KEY, value).
 const choicePrev = {};
+// «Вкл» of Autopodbor's sandboxes (fix.39.5): shown, inactive until the core can act on it.
+const AD_ON_SOON = true;
 function choiceSlider(key, opts, cur, label, local) {
   // A value none of the choices names (a retired channel) selects nothing: no thumb.
   const at = opts.findIndex(o => o[0] === cur), to = Math.max(0, at), from = choicePrev[key] != null ? choicePrev[key] : to, on = local || cfgOk();
