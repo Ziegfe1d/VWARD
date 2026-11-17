@@ -120,7 +120,8 @@ with tempfile.TemporaryDirectory() as t:
             fail(f"CORE_STARTED mode: {(tmp / 'events.log').read_text()[-200:]!r}")
         # fix.39: the switches are files the core reads while it runs.
         if args[args.index("--observe-if") + 1] != f"{tmp}/etc/adaptive.disabled" or args[args.index("--ads-sandbox-if") + 1] != f"{tmp}/etc/ads.sandbox" \
-                or args[args.index("--dnsblock-off-if") + 1] != f"{tmp}/etc/dnsblock.off":
+                or args[args.index("--dnsblock-off-if") + 1] != f"{tmp}/etc/dnsblock.off" \
+                or args[args.index("--ads-on-if") + 1] != f"{tmp}/etc/ads.on":
             fail(f"the Panel's switch files are not given to the core: {args}")
         if (tmp / "share/vward-core.sum").read_text().strip() != hashlib.sha256((tmp / "share/vward-core").read_bytes()).hexdigest():
             fail("the checked core's sum is kept beside it")
@@ -162,7 +163,7 @@ with tempfile.TemporaryDirectory() as t:
         time.sleep(0.5)
         calls(tmp)
         args = (tmp / "args").read_text().split()
-        if "--observe-if" in args or "--ads-sandbox-if" in args or "--dnsblock-off-if" in args or "--apply" in args:
+        if "--observe-if" in args or "--ads-sandbox-if" in args or "--ads-on-if" in args or "--dnsblock-off-if" in args or "--apply" in args:
             fail(f"an older build gets only the options it knows (Autopodbor off: no --apply): {args}")
         if (tmp / "installed").read_text().split() != ["core-install", "core-install"]:
             fail("an older build: the pinned one is fetched in the background")
@@ -290,7 +291,7 @@ core_install
         fail("core_install: the installed build's sum is kept beside it")
     # The real program knows the options S91 gives the pinned build (an unknown one would end it).
     usage = subprocess.run([str(tmp / "share/vward-core"), "adaptive", "--help"], capture_output=True, text=True).stderr
-    for opt in ("-observe-if", "-ads-sandbox-if", "-dnsblock-off-if"):
+    for opt in ("-observe-if", "-ads-sandbox-if", "-ads-on-if", "-dnsblock-off-if"):
         if opt not in usage:
             fail(f"the core does not know {opt}")
     if install("amd64", sum_amd64) != "result=unchanged":

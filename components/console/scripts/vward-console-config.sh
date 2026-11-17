@@ -35,6 +35,8 @@ LISTS_STATE="$ETC/route-engine/domain-lists"
 WAN_GUARD_FLAG="$ETC/wan-guard.disabled"
 ADAPTIVE_FLAG="$ETC/route-engine/adaptive.disabled"
 ADAPTIVE_ADS_FLAG="$ETC/route-engine/ads.sandbox"
+# «Вкл» (fix.39.5, owner 17.11.2026): adverts and counters are not sent to the VPN (the core reads it).
+ADAPTIVE_ADS_ON="$ETC/route-engine/ads.on"
 # «Обход блокировки по имени» (16.11.2026): the sandbox is on unless this file exists.
 ADAPTIVE_DNSBLOCK_OFF="$ETC/route-engine/dnsblock.off"
 CLASSIFIER_FILE="$ETC/route-engine/domain-classifier.conf"
@@ -763,16 +765,20 @@ op_guard_flag() {
     done_ok "$1 enabled=$3" changed
 }
 
-# adaptive-ads off|sandbox: «Реклама и счётчики» of Autopodbor (owner 13.11.2026; the rule «сначала
+# adaptive-ads off|sandbox|on: «Реклама и счётчики» of Autopodbor (owner 13.11.2026; the rule «сначала
 # песочница»). Sandbox - the core only names in its journal the adverts and counters it would not
 # send to the VPN and would take out of it; nothing on the router changes. The core looks at the
 # file itself, within seconds. «Вкл» comes with a later release, after the owner's check.
 op_adaptive_ads() {
     case "$1" in
-        sandbox) [ ! -e "$ADAPTIVE_ADS_FLAG" ] || done_ok "adaptive-ads sandbox" unchanged
-           mkdir -p "$(dirname "$ADAPTIVE_ADS_FLAG")" && printf 'sandbox from VWARD Panel %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "$ADAPTIVE_ADS_FLAG" || die write_failed ;;
-        off) [ -e "$ADAPTIVE_ADS_FLAG" ] || done_ok "adaptive-ads off" unchanged
-           rm -f "$ADAPTIVE_ADS_FLAG" || die write_failed ;;
+        sandbox) [ ! -e "$ADAPTIVE_ADS_FLAG" ] || [ -e "$ADAPTIVE_ADS_ON" ] || done_ok "adaptive-ads sandbox" unchanged
+           mkdir -p "$(dirname "$ADAPTIVE_ADS_FLAG")" && printf 'sandbox from VWARD Panel %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "$ADAPTIVE_ADS_FLAG" &&
+               rm -f "$ADAPTIVE_ADS_ON" || die write_failed ;;
+        on) [ ! -e "$ADAPTIVE_ADS_ON" ] || [ -e "$ADAPTIVE_ADS_FLAG" ] || done_ok "adaptive-ads on" unchanged
+           mkdir -p "$(dirname "$ADAPTIVE_ADS_ON")" && printf 'on from VWARD Panel %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "$ADAPTIVE_ADS_ON" &&
+               rm -f "$ADAPTIVE_ADS_FLAG" || die write_failed ;;
+        off) [ -e "$ADAPTIVE_ADS_FLAG" ] || [ -e "$ADAPTIVE_ADS_ON" ] || done_ok "adaptive-ads off" unchanged
+           rm -f "$ADAPTIVE_ADS_FLAG" "$ADAPTIVE_ADS_ON" || die write_failed ;;
         *) die invalid_value 64 ;;
     esac
     done_ok "adaptive-ads $1" changed
@@ -4116,7 +4122,7 @@ op_reset() {
     ( op_backup_create prereset ) >/dev/null || die backup_failed
     rs_route=
     [ ! -e "$COMPONENT_STATE/route-engine.disabled" ] || rs_route=1
-    rm -f "$TUNNEL_GUARD_FLAG" "$TUNNEL_FALLBACK_FLAG" "$TUNNEL_RETURN_FLAG" "$WAN_GUARD_FLAG" "$ADAPTIVE_FLAG" "$ADAPTIVE_ADS_FLAG" \
+    rm -f "$TUNNEL_GUARD_FLAG" "$TUNNEL_FALLBACK_FLAG" "$TUNNEL_RETURN_FLAG" "$WAN_GUARD_FLAG" "$ADAPTIVE_FLAG" "$ADAPTIVE_ADS_FLAG" "$ADAPTIVE_ADS_ON" \
         "$ETC/agents.conf" "$TUNNEL_AUTO_CONF" "$JOURNAL_CONF" "$COMPONENT_STATE"/*.disabled 2>/dev/null
     [ ! -f "$LISTS_CONF" ] || set_kv "$LISTS_CONF" smartdns_guard 1 0644 || true
     [ ! -f "$EXT_CONF" ] || { set_kv "$EXT_CONF" AGH_AUTO 0 0600; set_kv "$EXT_CONF" ENTWARE_AUTO 0 0600; } || true

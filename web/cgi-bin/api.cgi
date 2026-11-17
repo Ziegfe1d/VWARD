@@ -816,7 +816,7 @@ if [ "$ACTION" = config-data ]; then
     WG_ON=true; [ -e "$CONFIG_ETC/wan-guard.disabled" ] && WG_ON=false
     AD_ON=true; [ -e "$CONFIG_ETC/route-engine/adaptive.disabled" ] && AD_ON=false
     # «Реклама и счётчики» of Autopodbor (fix.39): off | sandbox.
-    AD_ADS=off; [ ! -e "$CONFIG_ETC/route-engine/ads.sandbox" ] || AD_ADS=sandbox
+    AD_ADS=off; [ ! -e "$CONFIG_ETC/route-engine/ads.sandbox" ] || AD_ADS=sandbox; [ ! -e "$CONFIG_ETC/route-engine/ads.on" ] || AD_ADS=on
     AD_DNS=sandbox; [ ! -e "$CONFIG_ETC/route-engine/dnsblock.off" ] || AD_DNS=off
     kv_file "$CONFIG_ETC/route-engine/domain-classifier.conf" CLASSIFIER_ENABLED=CL_FLAG
     CL_ON=true; [ "$CL_FLAG" = 0 ] && CL_ON=false

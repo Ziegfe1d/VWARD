@@ -292,15 +292,24 @@ with tempfile.TemporaryDirectory() as tmp:
     if not (etc / "route-engine/adaptive.disabled").exists():
         fail("AdaptiveAuto switch must create its flag")
     run("adaptive-mode", "1", expect="result=changed")
-    # fix.39 «Реклама и счётчики»: off | sandbox (the core reads the file itself); no «on» yet.
+    # fix.39 «Реклама и счётчики»: off | sandbox | on (the core reads the files itself).
     run("adaptive-ads", "sandbox", expect="result=changed")
     if not (etc / "route-engine/ads.sandbox").exists():
         fail("the adverts sandbox must create its file")
     run("adaptive-ads", "sandbox", expect="result=unchanged")
-    run("adaptive-ads", "on", expect="error=invalid_value")
+    # fix.39.5 «Вкл» (owner 17.11.2026): its own file; sandbox and off leave no trace of it.
+    run("adaptive-ads", "on", expect="result=changed")
+    if not (etc / "route-engine/ads.on").exists() or (etc / "route-engine/ads.sandbox").exists():
+        fail("«Вкл» must leave only ads.on")
+    run("adaptive-ads", "on", expect="result=unchanged")
+    run("adaptive-ads", "sandbox", expect="result=changed")
+    if (etc / "route-engine/ads.on").exists() or not (etc / "route-engine/ads.sandbox").exists():
+        fail("back to the sandbox must leave only ads.sandbox")
+    run("adaptive-ads", "on", expect="result=changed")
+    run("adaptive-ads", "bogus", expect="error=invalid_value")
     run("adaptive-ads", "off", expect="result=changed")
-    if (etc / "route-engine/ads.sandbox").exists():
-        fail("the adverts sandbox switched off must leave no file")
+    if (etc / "route-engine/ads.sandbox").exists() or (etc / "route-engine/ads.on").exists():
+        fail("the adverts switched off must leave no file")
     run("adaptive-ads", "off", expect="result=unchanged")
     # 16.11.2026 «Обход блокировки по имени»: sandbox by default (no file), off is a file the core reads.
     run("adaptive-dnsblock", "sandbox", expect="result=unchanged")

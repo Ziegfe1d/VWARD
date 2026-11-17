@@ -92,12 +92,12 @@ func (l *eventLog) put(event, host, why string) {
 }
 
 type adaptiveFlags struct {
-	rciAddr, lan, wan, tunDev, group, jdir, logPath, dns string
-	ownedPath, shellPersist, observeIf, adsIf, hints     string
-	dnsBlockOff                                          string
-	apply, reconcile                                     bool
-	workers, limit                                       int
-	batch, saveEvery, refresh, timeout, reconcileTick    time.Duration
+	rciAddr, lan, wan, tunDev, group, jdir, logPath, dns      string
+	ownedPath, shellPersist, observeIf, adsIf, adsOnIf, hints string
+	dnsBlockOff                                               string
+	apply, reconcile                                          bool
+	workers, limit                                            int
+	batch, saveEvery, refresh, timeout, reconcileTick         time.Duration
 }
 
 func parseAdaptive(name string, args []string) (*adaptiveFlags, *flag.FlagSet) {
@@ -114,6 +114,7 @@ func parseAdaptive(name string, args []string) (*adaptiveFlags, *flag.FlagSet) {
 	fs.BoolVar(&f.apply, "apply", false, "write into the group (without: observation, nothing sent)")
 	fs.StringVar(&f.observeIf, "observe-if", "", "files, comma-separated: while one of them exists nothing is written (Autopodbor switched off in the Panel)")
 	fs.StringVar(&f.adsIf, "ads-sandbox-if", "", "file: while it exists adverts and counters are named in the journal (sandbox, nothing changes)")
+	fs.StringVar(&f.adsOnIf, "ads-on-if", "", "file: while it exists adverts and counters are not sent to the VPN (the owner's «Вкл»; names already in the group stay)")
 	fs.StringVar(&f.dnsBlockOff, "dnsblock-off-if", "", "file: while it exists the sandbox of «blocked by name» is off (default: on - a name the router's DNS has no address for is asked through the tunnel and checked through the VPN, only told)")
 	fs.StringVar(&f.hints, "hints", "/opt/etc/vward/route-engine/hints-catalog.tsv", "the domain sources of blocked sites (itdog, Re:filter, antifilter; v2fly left out); empty: none")
 	fs.BoolVar(&f.reconcile, "reconcile", true, "take names out again once they open directly (3 checks in a row)")
@@ -222,20 +223,25 @@ func runAdaptive(args []string) {
 	// «Реклама и счётчики» in the sandbox (owner 13.11.2026; the rule «сначала песочница»): the
 	// names of ads.txt are only named - what would not be sent to the VPN and what would be
 	// taken out of it. Nothing is changed: they are added and kept as before.
-	var ads atomic.Bool
+	var ads, adsAct atomic.Bool
 	adsKnown := false
 	// syncAds (omu held): the sandbox's file read again; the names marked for the Panel.
 	syncAds := func() {
-		on := f.adsIf != "" && anyExists([]string{f.adsIf})
-		turned := on != ads.Load() || !adsKnown
+		// «Вкл» (fix.39.5, owner 17.11.2026): new adverts and counters are not added; the marks stay.
+		act := f.adsOnIf != "" && anyExists([]string{f.adsOnIf})
+		on := act || (f.adsIf != "" && anyExists([]string{f.adsIf}))
+		turned := on != ads.Load() || act != adsAct.Load() || !adsKnown
 		ads.Store(on)
+		adsAct.Store(act)
 		adsKnown = true
 		if owned.Mark(on) {
 			if err := owned.Save(); err != nil {
 				log.put("OWNED_UNSAVED", f.ownedPath, err.Error())
 			}
 		}
-		if turned && on {
+		if turned && act {
+			log.put("AD_MODE", "-", "on: adverts and counters are not sent to the VPN; the names already in the group stay")
+		} else if turned && on {
 			names := owned.Ads()
 			log.put("SANDBOX_AD_GROUP", "-", fmt.Sprintf("would take out of the VPN %d of %d%s", len(names), len(owned.Names), someNames(names, 12)))
 		}
@@ -381,13 +387,18 @@ func runAdaptive(args []string) {
 					case adaptive.Skip, adaptive.Known, adaptive.Cached:
 						continue
 					}
+					// The owner's «Вкл»: an advert or a counter is not added to the group.
+					skipAd := res.Outcome == adaptive.Add && res.Ad != "" && adsAct.Load()
 					mu.Lock()
 					stats["checked"]++
 					stats[string(res.Outcome)]++
 					if last[res.Host] != res.Outcome {
 						log.put(string(res.Outcome), res.Host, res.Why)
 						last[res.Host] = res.Outcome
-						if res.Outcome == adaptive.Add && res.Ad != "" && ads.Load() {
+						if skipAd {
+							stats["ads_skipped"]++
+							log.put("AD_SKIP", res.Host, "not sent to the VPN: an advert or a counter ("+res.Ad+")")
+						} else if res.Outcome == adaptive.Add && res.Ad != "" && ads.Load() {
 							stats["ads_would_skip"]++
 							log.put("SANDBOX_AD_SKIP", res.Host, "would not send to the VPN: an advert or a counter ("+res.Ad+")")
 						}
@@ -396,7 +407,7 @@ func runAdaptive(args []string) {
 							log.put("SANDBOX_DNS_BLOCK", res.Host, "would send to the VPN with its DNS through the tunnel ("+d+"): "+why)
 						}
 					}
-					if res.Outcome == adaptive.Add {
+					if res.Outcome == adaptive.Add && !skipAd {
 						pending[res.Host] = res.Direct
 						select {
 						case kick <- struct{}{}:
