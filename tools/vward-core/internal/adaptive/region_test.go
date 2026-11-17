@@ -128,3 +128,17 @@ func TestProbe403Body(t *testing.T) {
 		}
 	}
 }
+
+// A direct 403 while the tunnel does not answer is no «opens directly» (owner's journal 16.11.2026:
+// MAINT_DIRECT_CONFIRM chatgpt.com streak=1/3 http 403 half a minute before the tunnel was restarted;
+// three such rounds took ChatGPT out of the VPN). The name stays and its streak does not grow.
+func TestReconcileDirect403TunnelSilent(t *testing.T) {
+	o := func(why string) ProbeResult { return ProbeResult{Open, why} }
+	rc := ReconcileConfig{Every: time.Minute, Batch: 8, Threshold: 3, MinGap: time.Minute, TunnelDev: "opkgtun0"}
+	own := &Owned{Names: map[string]*Name{"chatgpt.com": {Streak: 2, LastOK: time.Unix(1, 0)}}}
+	p := &coded{ans: map[string][]ProbeResult{"ppp0 chatgpt.com": {o("http 403")}, "opkgtun0 chatgpt.com": {{Blocked, "connect: timeout"}}}}
+	rm, ev := Reconcile(context.Background(), own, p, "ppp0", rc, time.Unix(600, 0))
+	if len(rm) != 0 || len(ev) != 1 || ev[0].Event != "DIRECT_UNKNOWN" || own.Names["chatgpt.com"].Streak != 2 {
+		t.Fatalf("403 directly, tunnel silent: stays, streak kept, nothing counted: %v %+v %+v", rm, ev, own.Names["chatgpt.com"])
+	}
+}

@@ -73,10 +73,17 @@ func Reconcile(ctx context.Context, o *Owned, p Prober, wanDev string, rc Reconc
 		// A direct 403 or a certificate not for this name that the VPN answers properly is no
 		// «opens directly» (fix.39.2): the name stays, as for a direct failure.
 		if r.Verdict == Open && Suspect(r) && rc.TunnelDev != "" {
-			if v := p.Probe(ctx, h, rc.TunnelDev); RefusedHere(r, v) {
+			v := p.Probe(ctx, h, rc.TunnelDev)
+			if RefusedHere(r, v) {
 				n.Streak, n.LastOK, n.VPNFail, n.LastVPNFail = 0, time.Time{}, 0, time.Time{}
 				n.Why = r.Why + " refused"
 				ev = append(ev, ReconcileEvent{h, "DIRECT_FAIL", 0, r.Why + " refused; vpn: " + v.Why})
+				continue
+			}
+			// fix.39.5 (owner's journal 16.11.2026): the VPN did not answer, so a 403 or a foreign
+			// certificate cannot be told from a refusal - not counted as «opens directly».
+			if v.Verdict != Open {
+				ev = append(ev, ReconcileEvent{h, "DIRECT_UNKNOWN", 0, r.Why + "; vpn: " + v.Why + " (not counted)"})
 				continue
 			}
 		}

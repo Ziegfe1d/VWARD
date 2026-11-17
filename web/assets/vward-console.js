@@ -2954,7 +2954,7 @@ const RENDER = {
     const when = n => { const t = Date.parse(n.added || ''); return isNaN(t) ? '' : new Date(t).toDateString() === new Date().toDateString() ? 'с сегодня ' + adHm(t) : 'с ' + new Date(t).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }); };
     // fix.39: the core's marks - a content network's common name, a name that fails through the
     // VPN too (it leaves after 3 such checks), an advert or a counter (the sandbox).
-    const adsMode = cfgRoute().adaptive_ads === 'sandbox' ? 'sandbox' : 'off', adNames = names.filter(n => n.ad);
+    const adsMode = ['sandbox', 'on'].includes(cfgRoute().adaptive_ads) ? cfgRoute().adaptive_ads : 'off', adNames = names.filter(n => n.ad);
     const dnsMode = cfgRoute().adaptive_dnsblock === 'off' ? 'off' : 'sandbox';
     const marks = n => (n.cdn ? ' · <span class="st warn">общее имя CDN</span>' : '') + (n.ad ? ' · <span class="st warn">реклама или счётчик</span>' : '') +
       (n.vpn_fail > 0 ? ' · <span class="st warn">не открывается и через VPN (' + esc(n.vpn_fail) + ' из 3)</span>' : '');
@@ -2978,13 +2978,15 @@ const RENDER = {
       panel('Автоподбор доменов', '<dl class="kv">' + ctrlRow('Автоподбор доменов', sw('data-cfg-rt="adaptive-mode"', on, 'Автоподбор доменов', !cfgOk()), 'не открылся напрямую - идёт через VPN') +
         // fix.39 (owner 13.11.2026, «сначала песочница»); fix.39.5 (owner 16.11.2026): «Выкл · Песочница · Вкл»
         // always, «Вкл» inactive until the core can act (docs/TASK_SANDBOX_ON_2026-11-16.md).
-        ctrlRow('Реклама и счётчики мимо VPN', choiceSlider('ad-ads', [['off', 'Выкл'], ['sandbox', 'Песочница'], ['on', 'Вкл', AD_ON_SOON]], adsMode, 'Реклама и счётчики мимо VPN'),
+        ctrlRow('Реклама и счётчики мимо VPN', choiceSlider('ad-ads', [['off', 'Выкл'], ['sandbox', 'Песочница'], ['on', 'Вкл']], adsMode, 'Реклама и счётчики мимо VPN'),
           'рекламе и счётчикам VPN не нужен: страницы работают и без них', 'stack') +
+        confirmBox('ads-on', 'Включить? Новые рекламные домены и счётчики перестанут идти через VPN. Уже добавленные останутся и уйдут обычной проверкой. Вернуть - «Песочница» или «Выкл».', 'Включить') +
         // 16.11.2026 (owner: «добьём маршрутизацию и DNS»): the provider's DNS says «no such name» - the
         // sandbox asks the name through the tunnel and checks it through the VPN; «Вкл» - after it.
         ctrlRow('Обход блокировки по имени', choiceSlider('ad-dns', [['off', 'Выкл'], ['sandbox', 'Песочница'], ['on', 'Вкл', AD_ON_SOON]], dnsMode, 'Обход блокировки по имени'),
           'провайдер отвечает «такого сайта нет»: имя спрашивается через туннель и проверяется через VPN', 'stack') + '</dl>' +
-        (AD_ON_SOON ? '<p class="panel-desc">«Вкл» станет доступно отдельным обновлением, после проверки Песочницы на этом роутере. Сейчас VWARD только считает и ничего не меняет.</p>' : '') +
+        (AD_ON_SOON ? '<p class="panel-desc">«Вкл» у обхода блокировки по имени станет доступно отдельным обновлением, после проверки Песочницы на этом роутере.</p>' : '') +
+        (adsMode === 'on' ? '<p class="panel-desc">Вкл: новые рекламные домены и счётчики не идут через VPN (в журнале - «AD_SKIP»). Уже добавленные остаются, пока обычная проверка их не уберёт.</p>' : '') +
         (adsMode === 'sandbox' ? '<p class="panel-desc">' + adSandboxText(adNames.length, names.length) + '</p>' : '') +
         (dnsMode === 'sandbox' ? '<p class="panel-desc">' + adDnsText() + '</p>' : '')) +
       panel('Сейчас', '<div id="adFeed">' + adFeedHtml() + '</div>' +
@@ -3623,7 +3625,8 @@ function probeResult() {
 // the backups, owner 16.11.2026).
 // OPTS: [value, label, disabled]; a click goes to segPick(KEY, value).
 const choicePrev = {};
-// «Вкл» of Autopodbor's sandboxes (fix.39.5): shown, inactive until the core can act on it.
+// «Вкл» of «Обход блокировки по имени» (fix.39.5): shown, inactive until the core can act on it
+// («Реклама и счётчики мимо VPN» can: its «Вкл» works, after a confirmation).
 const AD_ON_SOON = true;
 function choiceSlider(key, opts, cur, label, local) {
   // A value none of the choices names (a retired channel) selects nothing: no thumb.
@@ -3638,7 +3641,8 @@ function segPick(key, v) {
   if (key === 'ad-way') { const d = ADV.open; if (!d || v === 'auto') return; ADV.open = '';
     cfgSet({ op: 'adaptive', action: v === 'vpn' ? 'pin' : 'remove', target: d }, v === 'vpn' ? d + ': всегда через VPN' : d + ': напрямую, автоподбор его больше не берёт', ['route', 'config']); return; }
   if (key === 'ad-dns') { cfgSet({ op: 'adaptive-dnsblock', value: v }, 'Обход блокировки по имени: ' + (v === 'sandbox' ? 'песочница' : 'выкл'), ['route']); return; }
-  if (key === 'ad-ads') { cfgSet({ op: 'adaptive-ads', value: v }, 'Реклама и счётчики мимо VPN: ' + (v === 'sandbox' ? 'песочница' : 'выкл'), ['route']); return; }
+  if (key === 'ad-ads') { if (v === 'on') { confirm = { id: 'ads-on' }; render(); return; }
+    cfgSet({ op: 'adaptive-ads', value: v }, 'Реклама и счётчики мимо VPN: ' + (v === 'sandbox' ? 'песочница' : 'выкл'), ['route']); return; }
   if (key === 'site-do') { if (v === 'block') { confirm = { id: 'site-block', dom: SITEDOM }; render(); } else siteDo(v, SITEDOM); return; }
   if (key === 'vsrv-sort') { VVIEW.sort = v; vViewSave(); render(); }
   else if (key === 'sd-store') sdStoreSet(v);
@@ -5297,6 +5301,7 @@ const CONFIRMED = {
   'vward-off': () => vwardPower('off'),
   'tunnel-down': () => tunnelState('down', current.slice(2)),
   'site-block': c => siteDo('block', c.dom),
+  'ads-on': () => cfgSet({ op: 'adaptive-ads', value: 'on' }, 'Реклама и счётчики мимо VPN: вкл', ['route']),
   'agh-official': () => extOp('agh-official', '', 'AGH_OFFICIAL'),
   'ext-upgrade': c => { const p = ((S.ext && S.ext.packages) || []).find(x => x.name === c.pkg); extOp('upgrade', c.pkg, p && p.critical ? 'EXT_UPGRADE_CRITICAL' : 'EXT_UPGRADE'); },
   'fw-channel': c => cfgSet({ op: 'firmware', target: 'channel', value: c.value, confirm: 'FIRMWARE_CHANNEL_TEST' }, 'Канал прошивки: ' + fwChannel(c.value), ['ext']),

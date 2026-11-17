@@ -468,9 +468,9 @@ command -v vward_core_adaptive_pid >/dev/null 2>&1 || vward_core_adaptive_pid() 
 core_sum()
 {
     case "$1" in
-        mipsle) echo ae511ce7441b02f4867b7d553ccabaf1c06627d9d11c47772bbdcb1888a0a24b ;;
-        mips) echo 0511bbbaeab0817b10a40f6181ecde60af4492910957fe9a76d4af013fa2305b ;;
-        arm64) echo be730da3fddef7c84c0eb6fd32309938a8a031d70d7cbcb3c4a8f04ec91cfd1f ;;
+        mipsle) echo 423c5b85d5d2b67b9548ecc9a44b571a7866bd67ca8578ad22a51625dece3ed6 ;;
+        mips) echo daaade32cbf2e47da21d09580dd60157a2c60dc542bcf1255c6beec821f74913 ;;
+        arm64) echo 7c9d66a4d38876c33204f84b534ab7554193ec138765d5a5c80f99f5bea907da ;;
         *) return 1 ;;
     esac
 }
@@ -601,7 +601,8 @@ core_start()
     if core_current; then
         # The pinned build reads the Panel's switches itself, while it runs.
         [ ! -e "$CORE_ETC/core.observe" ] || CS_MODE=
-        set -- --observe-if "$CORE_ETC/adaptive.disabled" --ads-sandbox-if "$CORE_ETC/ads.sandbox" --dnsblock-off-if "$CORE_ETC/dnsblock.off"
+        set -- --observe-if "$CORE_ETC/adaptive.disabled" --ads-sandbox-if "$CORE_ETC/ads.sandbox" --ads-on-if "$CORE_ETC/ads.on" \
+            --dnsblock-off-if "$CORE_ETC/dnsblock.off"
     else
         # An older build knows only the options of its own release.
         [ ! -e "$CORE_ETC/adaptive.disabled" ] && [ ! -e "$CORE_ETC/core.observe" ] || CS_MODE=
