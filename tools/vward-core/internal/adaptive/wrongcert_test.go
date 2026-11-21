@@ -66,7 +66,8 @@ func TestReconcileWrongCertNeedsVerifiedDirectAnswer(t *testing.T) {
 			}
 			now := time.Unix(1000, 0)
 			o := &Owned{Names: map[string]*Name{
-				host: {Streak: 2, LastOK: now.Add(-10 * time.Minute)},
+				host: {Streak: 2, LastOK: now.Add(-10 * time.Minute),
+					VPNFail: 2, LastVPNFail: now.Add(-10 * time.Minute)},
 			}}
 			rc := ReconcileConfig{Every: time.Minute, Batch: 8, Threshold: 3,
 				MinGap: 4 * time.Minute, TunnelDev: tc.tunnel}
@@ -76,6 +77,9 @@ func TestReconcileWrongCertNeedsVerifiedDirectAnswer(t *testing.T) {
 			}
 			if got := o.Names[host].Streak; got != tc.wantCount {
 				t.Fatalf("direct success streak = %d, want %d", got, tc.wantCount)
+			}
+			if n := o.Names[host]; n.VPNFail != 0 || !n.LastVPNFail.IsZero() {
+				t.Fatalf("unverified evidence preserved a failure streak: %+v", n)
 			}
 			if (len(removed) == 1) != (tc.wantEvent == "REMOVE") {
 				t.Fatalf("removed = %v, event = %s", removed, tc.wantEvent)
