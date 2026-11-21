@@ -83,10 +83,13 @@ func Reconcile(ctx context.Context, o *Owned, p Prober, wanDev string, rc Reconc
 			// fix.39.5 (owner's journal 16.11.2026): the VPN did not answer, so a 403 or a foreign
 			// certificate cannot be told from a refusal - not counted as «opens directly».
 			if v.Verdict != Open {
-				// Ambiguous evidence breaks both consecutive-success and
-				// consecutive-failure streaks; neither warrants removal.
-				n.Streak, n.LastOK, n.VPNFail, n.LastVPNFail = 0, time.Time{}, 0, time.Time{}
-				n.Why = r.Why
+				// Preserve the pre-existing 403/stall policy when the VPN
+				// cannot answer; only a mismatched direct certificate is
+				// invalid evidence for the confirmation streaks.
+				if WrongCert(r) {
+					n.Streak, n.LastOK, n.VPNFail, n.LastVPNFail = 0, time.Time{}, 0, time.Time{}
+					n.Why = r.Why
+				}
 				ev = append(ev, ReconcileEvent{h, "DIRECT_UNKNOWN", 0, r.Why + "; vpn: " + v.Why + " (not counted)"})
 				continue
 			}
