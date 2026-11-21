@@ -83,9 +83,21 @@ func Reconcile(ctx context.Context, o *Owned, p Prober, wanDev string, rc Reconc
 			// fix.39.5 (owner's journal 16.11.2026): the VPN did not answer, so a 403 or a foreign
 			// certificate cannot be told from a refusal - not counted as «opens directly».
 			if v.Verdict != Open {
+				// An ambiguous comparison interrupts the confirmation streak.
+				n.Streak, n.LastOK = 0, time.Time{}
+				n.Why = r.Why
 				ev = append(ev, ReconcileEvent{h, "DIRECT_UNKNOWN", 0, r.Why + "; vpn: " + v.Why + " (not counted)"})
 				continue
 			}
+		}
+		// A response from a different TLS identity is not proof that the
+		// requested site opens directly. This also applies when the tunnel
+		// is absent or answers with another mismatched certificate.
+		if r.Verdict == Open && WrongCert(r) {
+			n.Streak, n.LastOK = 0, time.Time{}
+			n.Why = r.Why
+			ev = append(ev, ReconcileEvent{h, "DIRECT_UNKNOWN", 0, r.Why + " (certificate mismatch; not counted)"})
+			continue
 		}
 		switch r.Verdict {
 		case Open:
