@@ -3163,6 +3163,7 @@ const AD_EV = {
   ISP_FAIL_VPN_FAIL: ['warn', 'не открылся ни напрямую, ни через VPN'], ISP_FAIL_VPN_UNSTABLE: ['warn', 'через VPN открывается нестабильно'],
   ISP_UNRELIABLE: ['warn', 'провайдер сейчас не отвечает - не проверялся'], MAINT_DIRECT_CONFIRM: ['ok', 'снова открывается напрямую'],
   MAINT_REMOVE: ['ok', 'вернулся напрямую'], REMOVED: ['ok', 'вернулся напрямую'], MAINT_DIRECT_FAIL: ['', 'проверка: напрямую не открывается, остаётся в VPN'],
+  MAINT_DIRECT_UNKNOWN: ['warn', 'результат проверки неоднозначен, маршрут сохранён'],
   // fix.39: checked through the VPN too; an advert or a counter named by the sandbox.
   MAINT_NO_PATH: ['', 'проверка: не открывается ни напрямую, ни через VPN'], DROPPED: ['warn', 'убран: не открывается ни напрямую, ни через VPN'],
   SANDBOX_AD_SKIP: ['info', 'Песочница: не отправил бы в VPN - реклама или счётчик'],
@@ -3173,14 +3174,15 @@ const AD_EV = {
 function adWhy(w) {
   w = String(w || '');
   return /451/.test(w) ? 'сайт закрыт по требованию (451)' : /region/.test(w) ? 'сайт не работает в этом регионе' :
-    /\bstall\b/.test(w) ? 'напрямую обрыв после первых КБ (блокировка «16 КБ»), через VPN целиком' : /wrong-cert/.test(w) ? 'напрямую чужой сертификат (заглушка провайдера), через VPN настоящий' : /403 refused/.test(w) ? 'сайт отказывает отсюда (403), через VPN отвечает' : /timeout/.test(w) ? 'нет ответа' :
+    /\bstall\b/.test(w) ? 'напрямую обрыв после первых КБ (блокировка «16 КБ»), через VPN целиком' : /wrong-cert/.test(w) ? 'чужой сертификат, доступ напрямую не подтверждён' : /403 refused/.test(w) ? 'сайт отказывает отсюда (403), через VPN отвечает' : /timeout/.test(w) ? 'нет ответа' :
     /reset/.test(w) ? 'соединение сброшено' : /refused/.test(w) ? 'соединение отклонено' : /closed|EOF/.test(w) ? 'соединение закрыто' : '';
 }
 function adFeedParse(text) {
-  return String(text || '').split('\n').map(l => l.split('|')).filter(f => f.length >= 3 && (AD_EV[f[1]] || (f[1] === 'PROBE_UNKNOWN' && /dns blocked/.test(f[3] || '')))).map(f => {
+  return String(text || '').split('\n').map(l => l.split('|')).filter(f => f.length >= 3 && (AD_EV[f[1]] || (f[1] === 'PROBE_UNKNOWN' && /dns blocked|wrong-cert/.test(f[3] || '')))).map(f => {
     // Taken out because DNS filters it (the core writes REMOVED; MAINT_REMOVE before fix.39).
-    const gone = (f[1] === 'MAINT_REMOVE' || f[1] === 'REMOVED') && /dns blocked/.test(f[3] || ''), isAd = f[1] === 'PROBE_UNKNOWN' || gone;
-    const ev = isAd ? ['warn', gone ? 'убран: возможно, реклама' : 'возможно, реклама: не добавлен'] : AD_EV[f[1]];
+    const gone = (f[1] === 'MAINT_REMOVE' || f[1] === 'REMOVED') && /dns blocked/.test(f[3] || ''), isAd = (f[1] === 'PROBE_UNKNOWN' && /dns blocked/.test(f[3] || '')) || gone;
+    const ev = isAd ? ['warn', gone ? 'убран: возможно, реклама' : 'возможно, реклама: не добавлен'] :
+      (f[1] === 'PROBE_UNKNOWN' ? ['warn', 'не удалось подтвердить прямой доступ'] : AD_EV[f[1]]);
     const streak = /(?:streak|fails)=(\d+)\/(\d+)/.exec(f[3] || '');
     return { t: Date.parse(f[0]), host: f[2], code: isAd ? 'ad' : f[1], tone: ev[0], text: ev[1] + ((f[1] === 'MAINT_DIRECT_CONFIRM' || f[1] === 'MAINT_NO_PATH') && streak ? ' (' + streak[1] + ' из ' + streak[2] + ')' : '') };
   }).reverse();

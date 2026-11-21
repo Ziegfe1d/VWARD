@@ -137,4 +137,35 @@ with tempfile.TemporaryDirectory() as tmp:
         fail("hours=N is N hours")
 if "hours: LOG_HOURS" not in JS or "const LOG_HOURS = 24" not in JS or "quiet: 'за 24 ч записей нет'" not in JS:
     fail("«Журналы» ask the API for the last 24 hours and name a quiet source")
+# An ambiguous TLS certificate is not evidence of direct access. The autopick
+# feed must show this as uncertainty, not as an ad or a confirmed good VPN.
+if shutil.which("node"):
+    a = JS.index("const AD_EV = {")
+    b = JS.index("function adFeedHtml()", a)
+    snippet = JS[a:b]
+    script = snippet + """
+const feed = [
+ '2026-11-21 15:10:00|PROBE_UNKNOWN|wrong.example|direct: http 200 wrong-cert; vpn: http 200 wrong-cert',
+ '2026-11-21 15:11:00|MAINT_DIRECT_UNKNOWN|remain.example|streak=0/3 direct: http 200 wrong-cert; vpn: http 200 wrong-cert',
+ '2026-11-21 15:12:00|PROBE_UNKNOWN|advert.example|direct: dns blocked'
+].join('\\n');
+console.log(JSON.stringify({entries: adFeedParse(feed).map(x => ({host:x.host, code:x.code, tone:x.tone, text:x.text})),
+ why: adWhy('direct: http 200 wrong-cert; vpn: http 200 wrong-cert')}));
+"""
+    p = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+    if p.returncode:
+        fail("adaptive certificate feed JS: " + p.stderr[-400:])
+    data = json.loads(p.stdout)
+    got = {x["host"]: x for x in data["entries"]}
+    if set(got) != {"wrong.example", "remain.example", "advert.example"}:
+        fail("ambiguous direct checks hidden from adaptive feed: " + repr(got))
+    if got["wrong.example"]["code"] != "PROBE_UNKNOWN" or got["wrong.example"]["tone"] != "warn":
+        fail("wrong certificate shown as successful or advertising: " + repr(got))
+    if got["remain.example"]["tone"] != "warn" or "маршрут сохранён" not in got["remain.example"]["text"]:
+        fail("maintenance ambiguity must keep the route: " + repr(got))
+    if got["advert.example"]["code"] != "ad":
+        fail("dns blocked advert classification regressed: " + repr(got))
+    if "через VPN настоящий" in data["why"] or "доступ напрямую не подтверждён" not in data["why"]:
+        fail("certificate tooltip claims an unverified VPN recovery: " + repr(data["why"]))
+
 print("CONSOLE_LOG_FEED=PASS")
