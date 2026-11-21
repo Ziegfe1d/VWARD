@@ -1,0 +1,79 @@
+name: PR106 one-off reproducible vward-core rebuild
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [dev]
+    paths:
+      - '.github/workflows/pr106-rebuild-core.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'fix/adaptive-wrong-cert-20261121'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Checkout PR head, not dev
+        uses: actions/checkout@v4
+        with:
+          ref: fix/adaptive-wrong-cert-20261121
+          persist-credentials: true
+          fetch-depth: 1
+      - name: Set up pinned Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.1'
+          cache: false
+      - name: Rebuild three architectures and update both SHA manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(go version)" = 'go version go1.25.1 linux/amd64'
+          test "$(git branch --show-current)" = 'fix/adaptive-wrong-cert-20261121'
+          out="$RUNNER_TEMP/vward-pr106-build"
+          sh tools/vward-core/build.sh "$out"
+          cp "$out/SHA256SUMS" tools/vward-core/SHA256SUMS
+          for arch in mipsle mips arm64; do
+            cp "$out/vward-core-linux-$arch.gz" "tools/vward-core/dist/vward-core-linux-$arch.gz"
+          done
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          root = Path('SHA256SUMS')
+          entries = {}
+          for line in root.read_text().splitlines():
+              digest, sep, path = line.partition('  ')
+              if not sep or len(digest) != 64 or path in entries:
+                  raise SystemExit('invalid existing root SHA256SUMS')
+              entries[path] = digest
+          paths = [
+              'tools/vward-core/SHA256SUMS',
+              'tools/vward-core/dist/vward-core-linux-mipsle.gz',
+              'tools/vward-core/dist/vward-core-linux-mips.gz',
+              'tools/vward-core/dist/vward-core-linux-arm64.gz',
+          ]
+          for path in paths:
+              if path not in entries:
+                  raise SystemExit('root SHA256SUMS missing '+path)
+              entries[path] = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+          root.write_text(''.join(f'{entries[path]}  {path}\n' for path in sorted(entries)))
+          PY
+          check="$RUNNER_TEMP/vward-pr106-check"
+          sh tools/vward-core/build.sh "$check" --check
+          for arch in mipsle mips arm64; do
+            cmp "$check/vward-core-linux-$arch.gz" "tools/vward-core/dist/vward-core-linux-$arch.gz"
+          done
+          sha256sum -c SHA256SUMS
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add SHA256SUMS tools/vward-core/SHA256SUMS tools/vward-core/dist/vward-core-linux-mipsle.gz tools/vward-core/dist/vward-core-linux-mips.gz tools/vward-core/dist/vward-core-linux-arm64.gz
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo 'Core artifacts already match their sources'
+          else
+            git commit -m 'build(core): refresh pinned Go 1.25.1 artifacts for wrong-cert fix'
+            git push origin HEAD:refs/heads/fix/adaptive-wrong-cert-20261121
+          fi
