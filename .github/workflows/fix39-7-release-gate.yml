@@ -3,7 +3,7 @@ name: Single-use fix.39.7 signed dev release gate
 on:
   push:
     branches: [dev]
-    paths: [VERSION]
+    paths: [VERSION, README.md]
 
 permissions:
   contents: read
