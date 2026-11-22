@@ -242,9 +242,18 @@ func (e *Engine) Check(ctx context.Context, raw string) Result {
 		// there is a refusal of this path or a spoof (api.anthropic.com, owner 16.11.2026; a
 		// provider's stub page), into the group as any blocked site.
 		if Suspect(d1) && e.cfg.TunnelDev != "" {
-			if v := e.p.Probe(ctx, h, e.cfg.TunnelDev); RefusedHere(d1, v) {
+			v := e.p.Probe(ctx, h, e.cfg.TunnelDev)
+			if RefusedHere(d1, v) {
 				return e.remember(Result{Host: h, Outcome: Add, Why: "direct: " + d1.Why + " refused; vpn: " + v.Why, Direct: d1.Why + " refused", Ad: AdName(h)}, e.cfg.FailFor)
 			}
+			if WrongCert(d1) {
+				// Neither an unreachable VPN nor another wrong certificate
+				// establishes that the requested name opens directly.
+				return e.remember(Result{Host: h, Outcome: ProbeUnknown, Why: "direct: " + d1.Why + "; vpn: " + v.Why + " (certificate mismatch)"}, e.cfg.UnknownFor)
+			}
+		}
+		if WrongCert(d1) {
+			return e.remember(Result{Host: h, Outcome: ProbeUnknown, Why: "direct: " + d1.Why + " (certificate mismatch; no tunnel verification)"}, e.cfg.UnknownFor)
 		}
 		return e.remember(Result{Host: h, Outcome: DirectOK, Why: d1.Why}, e.cfg.OKFor)
 	case Unknown:
@@ -302,8 +311,12 @@ func (e *Engine) checkHinted(ctx context.Context, h string) Result {
 	switch d.Verdict {
 	case Open:
 		if Suspect(d) {
-			if v := <-vpn; RefusedHere(d, v) {
+			v := <-vpn
+			if RefusedHere(d, v) {
 				return e.remember(Result{Host: h, Outcome: Add, Why: "direct: " + d.Why + " refused; vpn: " + v.Why + "; source lists", Direct: d.Why + " refused", Ad: AdName(h)}, e.cfg.FailFor)
+			}
+			if WrongCert(d) {
+				return e.remember(Result{Host: h, Outcome: ProbeUnknown, Why: "direct: " + d.Why + "; vpn: " + v.Why + " (certificate mismatch; source lists)"}, e.cfg.UnknownFor)
 			}
 		}
 		return e.remember(Result{Host: h, Outcome: DirectOK, Why: d.Why}, e.cfg.OKFor)
