@@ -3651,8 +3651,14 @@ log_file() {
         tunnel)
             echo /opt/var/log/vward-tunnel-guard.log
             ;;
+        dnsrules)
+            echo /opt/var/log/vward-tunnel-health.log
+            ;;
         policy)
             echo /opt/var/log/vward-policy-audit-summary.log
+            ;;
+        policyrun)
+            echo /opt/var/log/vward-policy-audit-chain.log
             ;;
         policysync)
             echo /opt/var/log/vward-policy-sync-sync.log
@@ -3694,7 +3700,7 @@ log_file() {
 }
 # «Все» in one answer (owner 12.11.2026: one request instead of one per journal): every source
 # but crond's own record, each after a «@@VWARD-LOG name» line; the Panel merges them.
-LOG_ALL_NAMES="wan recovery tunnel adaptive core routing policy ads updater console awg vless supervisor housekeeping integrity off"
+LOG_ALL_NAMES="wan recovery tunnel dnsrules adaptive core routing policy policyrun ads updater console awg vless supervisor housekeeping integrity off"
 
 if [ "$ACTION" = "log" ]; then
 
@@ -3713,7 +3719,38 @@ if [ "$ACTION" = "log" ]; then
     # The archives of earlier days come with «Архивировать».
     FULL="$(qget full)"; [ "$FULL" = 1 ] || FULL=
 
-    # log_show FILE: the last COUNT lines of FILE (of the last HOURS hours when asked), or why not.
+    # The two technical files also contain unrelated state and command output.
+    # Only these timestamped diagnostics and their known fields reach the Panel.
+    log_rows() {
+        case "$2" in
+            dnsrules|policyrun)
+                awk -v source="$2" '
+                    substr($0, 1, 19) !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]$/ {next}
+                    source == "dnsrules" && /^[^|]*\|DNS_RULES result=(ok|mismatch|mismatch_observed|gave_up|unknown|no_live_file)( |$)/ {
+                        printf "%s|DNS_RULES|%s", substr($0, 1, 19), $3
+                        for (i = 4; i <= NF; i++)
+                            if ($i ~ /^(config|live|reapplied|would_reapply|try|tries)=[0-9]+$/ || $i ~ /^resolves=(yes|no)$/)
+                                printf "|%s", $i
+                        printf "\n"
+                    }
+                    source == "policyrun" {
+                        stamp = substr($0, 1, 19)
+                        event = substr($0, 21)
+                        if (event == "===== AUDIT_CHAIN_START =====")
+                            print stamp "|POLICY_SCAN_START"
+                        else if (event ~ /^CHAIN_ABORT audit_rc=[0-9]+$/)
+                            print stamp "|POLICY_SCAN_ABORT|" $4
+                        else if (event == "CHAIN_ABORT audit_summary_not_confirmed")
+                            print stamp "|POLICY_SCAN_ABORT|reason=summary_unconfirmed"
+                    }' "$1" 2>/dev/null
+                ;;
+            *)
+                if [ "$3" -gt 0 ]; then tail -n "$3" "$1" 2>/dev/null; else cat "$1" 2>/dev/null; fi
+                ;;
+        esac
+    }
+
+    # log_show FILE SOURCE: live records, with the same limits applied after projection.
     log_show() {
         FILE="$1"
 
@@ -3722,13 +3759,19 @@ if [ "$ACTION" = "log" ]; then
         if [ -z "$FILE" ]; then
             echo "Журнал недоступен: неизвестный журнал."
         elif [ -n "$FULL" ] && [ -r "$FILE" ] && [ -s "$FILE" ]; then
-            cat "$FILE" 2>/dev/null
+            case "$2" in
+                dnsrules|policyrun)
+                    LOG_OUT="$(log_rows "$FILE" "$2" 0)"
+                    if [ -n "$LOG_OUT" ]; then printf '%s\n' "$LOG_OUT"; else echo "Журнал пуст: записей пока нет."; fi
+                    ;;
+                *) log_rows "$FILE" "$2" 0 ;;
+            esac
         elif [ -r "$FILE" ] && [ -s "$FILE" ] && [ -n "$HOURS" ]; then
             # An entry starts with its time («2026-11-02 10:51:03», «…T…», with «Z»/«+0300» or
             # without - then the router's own time); lines without a time belong to the entry above.
             # A journal without times at all (a program's raw output) is shown as it is.
             LOG_NOW="$(date +%s)" LOG_TZ="$(date +%z)"
-            LOG_OUT="$(tail -n $((COUNT * 5)) "$FILE" 2>/dev/null | awk -v now="$LOG_NOW" -v tz="$LOG_TZ" -v h="$HOURS" '
+            LOG_OUT="$(log_rows "$FILE" "$2" "$((COUNT * 5))" | awk -v now="$LOG_NOW" -v tz="$LOG_TZ" -v h="$HOURS" '
                 function ep(t, z,    y, m, d, o) {
                     y = substr(t, 1, 4) + 0; m = substr(t, 6, 2) + 0; d = substr(t, 9, 2) + 0
                     if (m <= 2) { y--; m += 9 } else m -= 3
@@ -3752,7 +3795,13 @@ if [ "$ACTION" = "log" ]; then
                 echo "За последние $HOURS ч записей нет: старые записи остаются в файле журнала и в архиве."
             fi
         elif [ -r "$FILE" ] && [ -s "$FILE" ]; then
-            tail -n "$COUNT" "$FILE" 2>/dev/null
+            case "$2" in
+                dnsrules|policyrun)
+                    LOG_OUT="$(log_rows "$FILE" "$2" 0 | tail -n "$COUNT")"
+                    if [ -n "$LOG_OUT" ]; then printf '%s\n' "$LOG_OUT"; else echo "Журнал пуст: записей пока нет."; fi
+                    ;;
+                *) log_rows "$FILE" "$2" "$COUNT" ;;
+            esac
         elif [ -r "$FILE" ]; then
             echo "Журнал пуст: записей пока нет."
         elif [ -e "$FILE" ]; then
@@ -3767,12 +3816,12 @@ if [ "$ACTION" = "log" ]; then
         for LN in $LOG_ALL_NAMES; do
             echo "@@VWARD-LOG $LN"
             # Tests run on a copy of the router's files (empty prefix on the router).
-            log_show "${VWARD_ROOT_PREFIX:-}$(log_file "$LN")"
+            log_show "${VWARD_ROOT_PREFIX:-}$(log_file "$LN")" "$LN"
         done
     else
         FILE="$(log_file "$NAME")" || FILE=
         [ -z "$FILE" ] || FILE="${VWARD_ROOT_PREFIX:-}$FILE"
-        log_show "$FILE"
+        log_show "$FILE" "$NAME"
     fi
     exit 0
 fi

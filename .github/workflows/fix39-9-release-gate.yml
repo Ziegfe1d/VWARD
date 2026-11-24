@@ -1,4 +1,4 @@
-name: Single-use fix.39.8 signed dev release gate
+name: Single-use fix.39.9 signed dev release gate
 
 on:
   push:
@@ -23,10 +23,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(cat VERSION)" = '0.2.0-rc.2.fix.39.8'
-          test "$(jq -r '.signed.version' updates/dev/update-manifest.json)" = '0.2.0-rc.2.fix.39.7'
-          test "$(jq -r '.signed.sequence' updates/dev/update-manifest.json)" -lt 2026112401
-          test "$(jq -r '.signed.sequence' updates/dev/v2/manifest.json)" -lt 2026112401
+          test "$(cat VERSION)" = '0.2.0-rc.2.fix.39.9'
+          test "$(jq -r '.signed.version' updates/dev/update-manifest.json)" = '0.2.0-rc.2.fix.39.8'
+          test "$(jq -r '.signed.sequence' updates/dev/update-manifest.json)" -lt 2026112501
+          test "$(jq -r '.signed.sequence' updates/dev/v2/manifest.json)" -lt 2026112501
           sha256sum -c SHA256SUMS
       - name: Wait for full VWARD CI on exact pushed dev SHA
         shell: bash
@@ -70,7 +70,7 @@ jobs:
           latest=$(gh api "repos/$GITHUB_REPOSITORY/branches/dev" --jq '.commit.sha')
           test "$latest" = "$GITHUB_SHA" || { echo 'ERROR: dev moved'; exit 1; }
           gh workflow run build-dev-release.yml --ref dev \
-            -f sequence=2026112401 \
+            -f sequence=2026112501 \
             -f min_vward=0.1.9-beta \
             -f priority=ROUTINE
           echo 'SIGNED_RELEASE=DISPATCHED; publication remains unconfirmed until its workflow succeeds'

@@ -780,7 +780,9 @@ function compCascade(id, off) {
 const compNames = ids => ids.map(x => '«' + compName(x) + '»').join(', ');
 const LOG_TABS = [
   { id: 'wan', label: 'Интернет' }, { id: 'recovery', label: 'Восстановление' }, { id: 'tunnel', label: 'VPN' },
+  { id: 'dnsrules', label: 'DNS через VPN' },
   { id: 'adaptive', label: 'Автоподбор доменов' }, { id: 'core', label: 'Автоподбор (Go)' }, { id: 'routing', label: 'Сверка маршрутов' }, { id: 'policy', label: 'IP-категории' },
+  { id: 'policyrun', label: 'Запуски проверки IP-категорий' },
   { id: 'ads', label: 'Реклама' }, { id: 'updater', label: 'Обновления' }, { id: 'cron', label: 'Расписание' }, { id: 'console', label: 'Панель VWARD' },
   { id: 'awg', label: 'AmneziaWG' }, { id: 'vless', label: 'VLESS' },
   { id: 'supervisor', label: 'Агент компонентов' }, { id: 'housekeeping', label: 'Обслуживание' }, { id: 'integrity', label: 'Целостность файлов' }, { id: 'off', label: 'Отключение VWARD' }
@@ -858,6 +860,7 @@ const LOG_CODES = {
   MAINT_ISP_PROBE_UNRELIABLE: 'Проверка через провайдера недостоверна: сайты не оцениваются', ADD_ABORT_ISP_UNRELIABLE: 'Не добавлен в VPN: проверка через провайдера недостоверна',
   ADD_SKIP_RU_ZONE: 'Российский домен: не через VPN', ADD_SKIP_ROUTER_OWN: 'Служба роутера (KeenDNS, облако): не через VPN', HINT_SKIP_ROUTER_OWN: 'Служба роутера (KeenDNS, облако): не через VPN', ADD_ABORT_WG_FAIL: 'Не добавлен: VPN тоже не открывает', ADD_ABORT_DIRECT_RECOVERED: 'Не добавлен: открылся напрямую',
   ABORTED_ISP_PROBE_UNRELIABLE: 'Проверка IP-категорий остановлена: проверка через провайдера недостоверна', ABORTED_TUNNEL_DOWN: 'Проверка IP-категорий остановлена: туннель не отвечает',
+  POLICY_SCAN_START: 'Проверка IP-категорий запущена',
   AGH_BIND_FULL: 'Нет места для DNS-привязки в Keenetic', AGH_UNBIND: 'DNS-привязка снята', ADAPTIVE_FULL: 'AdaptiveAuto полон'
 };
 const logLevel = t => /ERROR|FAILED\b|_FAIL\b|CRASH|BROKEN|ошибк|не удал/i.test(t) ? 'err' :
@@ -905,6 +908,52 @@ function logEntry(raw) {
         more: ['Туннель ' + tun].concat(parts.slice(1).map(logField), more),
         level: attempted ? 'warn' : 'info' };
     }
+  }
+  if (code === 'DNS_RULES') {
+    const fields = {};
+    parts.forEach(p => {
+      const m = /^(result|config|live|reapplied|resolves)=(\w+)$/.exec(p);
+      if (m) fields[m[1]] = m[2];
+    });
+    const active = 'Активно ' + fields.live + ' из ' + fields.config + ' правил DNS через VPN';
+    let text = 'Не удалось подтвердить активные правила DNS через VPN', level = 'warn';
+    switch (fields.result) {
+      case 'ok':
+        text = active;
+        if (fields.resolves === 'no') text += '. Контрольный запрос не вернул IPv4-адрес';
+        else level = 'ok';
+        break;
+      case 'mismatch':
+        text = active + '. Keenetic принял ' + fields.reapplied + ' повторно поданных правил';
+        break;
+      case 'mismatch_observed':
+        text = active + '. Режим наблюдения';
+        break;
+      case 'gave_up':
+        text = active + '. Попытки восстановления исчерпаны';
+        break;
+      case 'no_live_file':
+        text = 'Не удалось прочитать активные правила DNS через VPN';
+        break;
+    }
+    return { t: t, src: src, code: code, text: text, more: more, level: level };
+  }
+  if (code === 'POLICY_SCAN_ABORT') {
+    const rc = /^audit_rc=(\d+)$/.exec(parts[0] || '');
+    const text = rc ? 'Проверка IP-категорий завершилась с ошибкой (код ' + rc[1] + ')' :
+      'Проверка IP-категорий остановлена. Итог скана не подтверждён';
+    return { t: t, src: src, code: code, text: text, more: more, level: 'warn' };
+  }
+  if (code === 'SKIPPED_TUNNEL_DOWN') {
+    return { t: t, src: src, code: code, text: 'Проверка IP-категорий пропущена. Доступность VPN не подтверждена',
+      more: parts.map(logField).concat(more), level: 'warn' };
+  }
+  const scan = /^duration=\d+s\|targets=(\d+)\|checked=(\d+)(?:\||$)/.exec(body);
+  if (scan) {
+    const complete = scan[1] === scan[2];
+    const text = (complete ? 'Проверка IP-категорий завершена' : 'Проверка IP-категорий выполнена частично') +
+      '. Проверено ' + scan[2] + ' из ' + scan[1];
+    return { t: t, src: src, code: code, text: text, more: parts.slice(3).map(logField).concat(more), level: complete ? 'ok' : 'warn' };
   }
   const words = (code ? (LOG_CODES[code] || code.toLowerCase().replace(/_/g, ' ')) : '') + (parts.length ? (code ? ': ' : '') + parts.map(logField).join(' · ') : '');
   return { t: t, src: src, code: code, text: words.replace(/\bCONSOLE\b/g, 'Панель VWARD').replace(/Консоль/g, 'Панель VWARD'), more: more, level: logLevel(code + ' ' + body) };
