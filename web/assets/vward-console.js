@@ -868,7 +868,8 @@ const wbr = h => h.replace(/([.\-\/])(?=[A-Za-z0-9А-Яа-я])/g, '$1<wbr>');
 // Reasons the DNS guard writes (DNS_CHAIN_OUT reason=…, WOULD_TAKE_OUT …): words, not codes.
 const LOG_VALUES = { loop_upstream: 'AdGuard Home отправляет запросы обратно роутеру', loop: 'AdGuard Home перезапускался по кругу', silent: 'AdGuard Home не отвечал',
   silent_10min: 'AdGuard Home не отвечал 10 минут', fast: 'AdGuard Home не отвечал 15 с', update: 'плановый перезапуск AdGuard Home', keenetic_busy: 'Keenetic был занят',
-  provider_silent: 'DNS провайдера тоже не отвечал', hourly_limit: 'уже выводился в этот час' };
+  provider_silent: 'DNS провайдера тоже не отвечал', hourly_limit: 'уже выводился в этот час',
+  adapter_cycle: 'интерфейс туннеля включился снова', both_probes_failed: 'оба контрольных адреса через туннель без ответа' };
 function logField(f) {
   const m = /^([a-z_]+)=(.*)$/i.exec(f), k = m ? m[1] : '', v0 = m ? m[2] : f;
   if ((!k || k === 'reason') && LOG_VALUES[v0]) return (k ? 'причина: ' : '') + LOG_VALUES[v0];

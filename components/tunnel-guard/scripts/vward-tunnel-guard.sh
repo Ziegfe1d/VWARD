@@ -459,22 +459,22 @@ if [ -f "$DISABLE_FILE" ]; then
     FAILOPEN_ACTIVE=0
     DOWN_STREAK=0
 
-    NOW=$(date +%s)
-    NOW_TEXT=$(date '+%Y-%m-%d %H:%M:%S')
-    TMP="$STATE.tmp.$$"
+    if [ "$OLD_MODE|$OLD_STREAK|$OLD_ACTIVE|$OLD_RECOVERY|$OLD_ACTION" != "$MODE|0|0|0|DISABLED_BY_USER" ]; then
+        TMP="$STATE.tmp.$$"
+        {
+            echo "MODE=$MODE"
+            echo "DOWN_STREAK=0"
+            echo "FAILOPEN_ACTIVE=0"
+            echo "LAST_RECOVERY_TEST=0"
+            echo "LAST_ACTION=DISABLED_BY_USER"
+            echo "LAST_RUN=$NOW"
+        } > "$TMP" &&
+        mv "$TMP" "$STATE" || rm -f "$TMP"
+    fi
 
-    {
-        echo "MODE=$MODE"
-        echo "DOWN_STREAK=0"
-        echo "FAILOPEN_ACTIVE=0"
-        echo "LAST_RECOVERY_TEST=0"
-        echo "LAST_ACTION=DISABLED_BY_USER"
-        echo "LAST_RUN=$NOW"
-    } > "$TMP" &&
-
-    mv "$TMP" "$STATE" || rm -f "$TMP"
-
-    echo "$NOW_TEXT|DISABLED_BY_USER|restored=$RESTORED" >> "$LOG"
+    if [ "$OLD_ACTION" != DISABLED_BY_USER ] || [ "$RESTORED" = 1 ]; then
+        echo "$NOW_TEXT|DISABLED_BY_USER|restored=$RESTORED" >> "$LOG"
+    fi
 
     echo "ACTION=DISABLED_BY_USER"
     echo "RestoredWG=$RESTORED"
