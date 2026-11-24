@@ -4921,7 +4921,9 @@ journal_file() {
         core) echo /opt/var/log/vward-core-adaptive.log ;;
         updater) echo /opt/var/log/vward/updater.log ;;
         tunnel) echo /opt/var/log/vward-tunnel-guard.log ;;
+        dnsrules) echo /opt/var/log/vward-tunnel-health.log ;;
         policy) echo /opt/var/log/vward-policy-audit-summary.log ;;
+        policyrun) echo /opt/var/log/vward-policy-audit-chain.log ;;
         policysync) echo /opt/var/log/vward-policy-sync-sync.log ;;
         console) echo /opt/var/log/vward/console-audit.log ;;
         wifi) echo /opt/var/log/vward-wifi-client-guard.log ;;
@@ -4943,7 +4945,7 @@ journal_file() {
 # cleared console journal starts with who cleared it.
 op_journal_clear() {
     case "$1" in
-        all) jc_names="wan recovery tunnel adaptive core routing policy ads updater console awg vless supervisor housekeeping integrity off" ;;
+        all) jc_names="wan recovery tunnel dnsrules adaptive core routing policy policyrun ads updater console awg vless supervisor housekeeping integrity off" ;;
         *) journal_file "$1" >/dev/null || die invalid_value 64; jc_names=$1 ;;
     esac
     jc_done=0

@@ -47,6 +47,33 @@ for gone in ("|", "CONSOLE", "2026-11-02T", "1.256241", "HINT_"):
 if "Автоподбор:" in al or al.count('class="log-e') != 5:
     fail("«Все» shows every entry, nothing folded")
 
+# Boot DNS rules and nightly scan: counts are observed, and only an actual
+# outcome may render completion. A control query can fail with all rules loaded.
+diagnostics = [
+    ("DNS_RULES|result=mismatch|config=16|live=1|reapplied=15", "Активно 1 из 16 правил DNS через VPN. Keenetic принял 15 повторно поданных правил", "warn"),
+    ("DNS_RULES|result=ok|config=16|live=16|resolves=yes", "Активно 16 из 16 правил DNS через VPN", "ok"),
+    ("DNS_RULES|result=ok|config=16|live=16|resolves=no", "Активно 16 из 16 правил DNS через VPN. Контрольный запрос не вернул IPv4-адрес", "warn"),
+    ("DNS_RULES|result=unknown|config=16|live=0", "Не удалось подтвердить активные правила DNS через VPN", "warn"),
+    ("DNS_RULES|result=gave_up|config=16|live=15|tries=3", "Активно 15 из 16 правил DNS через VPN. Попытки восстановления исчерпаны", "warn"),
+    ("POLICY_SCAN_START", "Проверка IP-категорий запущена", "info"),
+    ("POLICY_SCAN_ABORT|audit_rc=1", "Проверка IP-категорий завершилась с ошибкой (код 1)", "warn"),
+    ("POLICY_SCAN_ABORT|reason=summary_unconfirmed", "Проверка IP-категорий остановлена. Итог скана не подтверждён", "warn"),
+    ("SKIPPED_TUNNEL_DOWN|health=none", "Проверка IP-категорий пропущена. Доступность VPN не подтверждена", "warn"),
+    ("duration=1785s|targets=538|checked=538|ok=23", "Проверка IP-категорий завершена. Проверено 538 из 538", "ok"),
+    ("duration=14s|targets=538|checked=2", "Проверка IP-категорий выполнена частично. Проверено 2 из 538", "warn"),
+]
+sample = json.dumps([row[0] for row in diagnostics])
+js = h.split("const T = [")[0] + f"""
+console.log(JSON.stringify({sample}.map(line => {{
+  const e = logEntry('2026-11-25 00:10:04|' + line);
+  return [e.text, e.level];
+}})));
+"""
+r = subprocess.run(["node", "-e", js], capture_output=True, text=True)
+got = json.loads(r.stdout) if r.returncode == 0 else r.stderr[-400:]
+if got != [list(row[1:]) for row in diagnostics]:
+    fail(f"DNS rule and scan cards: {got}")
+
 # fix.35.3 (owner 02.11: «vless-server servers OpkgTun4 result=checked» read «изменены»): a Panel action
 # says its real result; the technical words go to the details.
 h3 = h.split("const T = [")[0] + """

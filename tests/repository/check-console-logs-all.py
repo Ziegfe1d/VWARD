@@ -7,6 +7,7 @@ what is shown."""
 import json
 import os
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -116,6 +117,21 @@ with tempfile.TemporaryDirectory() as tmp:
     tmp = Path(tmp); log = tmp / "opt/var/log"; (log / "vward/archive").mkdir(parents=True); (tmp / "tmp").mkdir()
     (log / "vward-wan-guard.log").write_text("2026-11-12 10:00:00+0300 class=HEALTHY\n")
     (log / "vward-tunnel-guard.log").write_text("".join(f"2026-11-12 10:{i:02d}:00|OK\n" for i in range(40)))
+    (log / "vward-tunnel-health.log").write_text(
+        "2026-11-12 10:00:00|DOWN->UP|if=1\n"
+        "2026-11-12 10:01:00|DNS_RULES result=mismatch config=16 live=1 reapplied=15 try=1 missing=private.example\n"
+        "2026-11-12 10:02:00|DNS_RULES result=ok config=16 live=16 tries=1 resolves=no\n"
+        "2026-11-12 10:03:00|DNS_RULES result=no_live_file\n")
+    (log / "vward-policy-audit-chain.log").write_text(
+        "2026-11-12 00:10:04 ===== AUDIT_CHAIN_START =====\n"
+        "2026-11-12 00:10:04 SUMMARY_BEFORE=private.example\n"
+        "2026-11-12 00:10:09 AUDIT_PROCESS_FINISHED rc=1\n"
+        "2026-11-12 00:10:09 CHAIN_ABORT audit_rc=1\n"
+        "2026-11-12 00:11:08 CHAIN_ABORT audit_summary_not_confirmed\n"
+        "untimestamped https://private.example/\n")
+    (log / "vward-policy-audit-summary.log").write_text(
+        "2026-11-11 00:10:12|SKIPPED_TUNNEL_DOWN|tunnel=OpkgTun0|health=none\n"
+        "2026-11-10 00:39:47|duration=1785s|targets=538|checked=538|ok=23\n")
     (log / "vward/archive/vward-tunnel-guard.log.20261111-000000.gz").write_text("old")
     e = os.environ | {"REQUEST_METHOD": "GET", "QUERY_STRING": "action=log&name=all&count=20", "VWARD_ROOT_PREFIX": str(tmp), "JQ": jq or "jq",
                       "VWARD_PROFILE_LIB": str(tmp / "none")}
@@ -123,11 +139,40 @@ with tempfile.TemporaryDirectory() as tmp:
     heads = re.findall(r"^@@VWARD-LOG ([a-z]+)$", out, re.M)
     if heads != all_api or "class=HEALTHY" not in out or out.count("|OK") != 20 or "10:39:00|OK" not in out:
         fail(f"RED: name=all must answer every source once, each cut to count: {heads} {out[:400]!r}")
+    samples = [
+        "@@VWARD-LOG dnsrules\n2026-11-12 10:01:00|DNS_RULES|result=mismatch|config=16|live=1|reapplied=15|try=1",
+        "10:02:00|DNS_RULES|result=ok|config=16|live=16|tries=1|resolves=no",
+        "10:03:00|DNS_RULES|result=no_live_file",
+        "@@VWARD-LOG policyrun\n2026-11-12 00:10:04|POLICY_SCAN_START",
+        "00:10:09|POLICY_SCAN_ABORT|audit_rc=1",
+        "00:11:08|POLICY_SCAN_ABORT|reason=summary_unconfirmed",
+        "|SKIPPED_TUNNEL_DOWN|",
+        "|duration=1785s|targets=538|checked=538|ok=23",
+    ]
+    def check_diagnostics(out):
+        for sample in samples:
+            if sample not in out:
+                fail(f"the DNS and scan events are missing: {sample!r}")
+        if any(raw in out for raw in ("DOWN->UP", "private.example", "SUMMARY_BEFORE", "AUDIT_PROCESS_FINISHED")):
+            fail("the diagnostic journals must export only the relevant events and fields")
+    check_diagnostics(out)
+    # Filter first, so unrelated tunnel state changes do not push the recent DNS event
+    # outside the read limit. The filtered journal can also be requested on its own.
+    live_health = log / "vward-tunnel-health.log"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with live_health.open("a") as live:
+        live.write(f"{now}|DNS_RULES result=gave_up config=16 live=15 tries=3\n")
+        live.write(f"{now}|DEGRADED->UP|if=1\n" * 110)
+    e["QUERY_STRING"] = "action=log&name=dnsrules&count=20&hours=1"
+    out = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=e, capture_output=True, text=True).stdout.split("\n\n", 1)[-1]
+    if out.strip() != f"{now}|DNS_RULES|result=gave_up|config=16|live=15|tries=3":
+        fail(f"recent DNS events must survive the count and hour filters: {out!r}")
     # «Скачать» (owner 13.11.2026): the whole live journal, not the entries shown.
     e["QUERY_STRING"] = "action=log&name=all&count=20&full=1"
     out = subprocess.run(["sh", str(ROOT / "web/cgi-bin/api.cgi")], env=e, capture_output=True, text=True).stdout.split("\n\n", 1)[-1]
     if out.count("|OK") != 40 or "10:00:00|OK" not in out:
         fail(f"RED: full=1 must answer the whole live journal: {out.count('|OK')} entries")
+    check_diagnostics(out)
     if jq:
         def clear(value, confirm="LOG_CLEAR"):
             body = f"op=journal&target=clear&value={value}" + (f"&confirm={confirm}" if confirm else "")
