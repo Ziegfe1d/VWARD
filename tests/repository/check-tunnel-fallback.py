@@ -128,6 +128,21 @@ echo result=changed
         fail(f"restored but left off in Keenetic: {r.stdout[:80]!r} {(tmp / 'ndmc.log').read_text()!r}")
     if "FAILOPEN_ACTIVE=0" not in (gdir / "state").read_text():
         fail("restored: the guard no longer holds the tunnel")
+    # With the guard disabled, the first run records the transition. Steady state
+    # must leave the persistent state and log alone while keeping the CLI status.
+    disabled = etc / "tunnel-guard.disabled"
+    disabled.touch()
+    if run("UP", "") != "ACTION=DISABLED_BY_USER":
+        fail("the disabled guard must still report its status")
+    state = gdir / "state"
+    log = tmp / "guard.log"
+    previous_log = log.read_text()
+    previous_state = state.stat().st_ino
+    if "|DISABLED_BY_USER|restored=0" not in previous_log:
+        fail("the transition to disabled must be logged")
+    if run("UP", "") != "ACTION=DISABLED_BY_USER" or log.read_text() != previous_log or state.stat().st_ino != previous_state:
+        fail("a guard that stays disabled must not rewrite its state or add another event")
+    disabled.unlink()
     # Return switched off: the routes stay where they are.
     (etc / "tunnel-return.disabled").write_text("x")
     run("DOWN", alive)

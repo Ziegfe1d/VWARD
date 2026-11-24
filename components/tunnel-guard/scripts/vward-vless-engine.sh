@@ -44,6 +44,8 @@ OPKGTUN_MAX=9
 # Through HTTP: whether pages pass needs no TLS, and Entware's OpenSSL 3.5.5 crashes on some
 # routers («Illegal instruction», a Viva, 2026-10-11): every check through it said «dead».
 CHECK_URL=${VWARD_VLESS_CHECK_URL:-http://1.1.1.1/cdn-cgi/trace}
+SECONDARY_CHECK_URL=http://1.0.0.1/cdn-cgi/trace
+[ "$CHECK_URL" != "$SECONDARY_CHECK_URL" ] || SECONDARY_CHECK_URL=http://1.1.1.1/cdn-cgi/trace
 
 XRAY_VERSION=26.9.9
 XRAY_URL=${VWARD_XRAY_URL:-https://github.com/XTLS/Xray-core/releases/download/v$XRAY_VERSION}
@@ -535,9 +537,9 @@ stop_one() {
     rm -f "$ENGINE_RUN/v$1.pid"
 }
 
-# connected NAME: a page opened through the tunnel's adapter (VLESS has no handshake to read).
+# connected NAME [URL]: a page opened through the tunnel's adapter (no VLESS handshake to read).
 connected() {
-    "$CURL" --http1.1 -4 -s -o /dev/null --noproxy '*' --interface "$(adapter_of "$1")" --connect-timeout 5 --max-time 8 "$CHECK_URL" </dev/null 2>/dev/null
+    "$CURL" --http1.1 -4 -s -o /dev/null --noproxy '*' --interface "$(adapter_of "$1")" --connect-timeout 5 --max-time 8 "${2:-$CHECK_URL}" </dev/null 2>/dev/null
 }
 
 step() { { printf 'step=%s\n' "$1" >&3; } 2>/dev/null || :; }
@@ -657,6 +659,7 @@ op_supervise() {
             2) continue ;;
         esac
         if recent "$n"; then rm -f "$ENGINE_RUN/v$n.down" "$ENGINE_RUN/v$n.miss"; continue; fi
+        restart_reason=adapter_cycle
         if [ ! -e "$ENGINE_RUN/v$n.down" ]; then
             connected "$name" </dev/null && { rm -f "$ENGINE_RUN/v$n.miss" "$ENGINE_RUN/v$n.fails"; continue; }
             # Not this module's decision (one decision, one agent): VWARD's tunnel for routes
@@ -664,8 +667,11 @@ op_supervise() {
             # channel), or no internet at the provider (a restart or another server would not
             # help and could leave a working server).
             if guard_owns "$name" || ! wan_alive; then rm -f "$ENGINE_RUN/v$n.miss" "$ENGINE_RUN/v$n.fails"; continue; fi
-            # One silent minute may be the server or the line: Xray starts afresh on the second.
+            # Confirm a repeated primary failure against the other health-check address
+            # on the same adapter before a restart or automatic server switch.
             [ -e "$ENGINE_RUN/v$n.miss" ] || { : > "$ENGINE_RUN/v$n.miss"; continue; }
+            connected "$name" "$SECONDARY_CHECK_URL" && { rm -f "$ENGINE_RUN/v$n.miss" "$ENGINE_RUN/v$n.fails"; continue; }
+            restart_reason=both_probes_failed
         fi
         rm -f "$ENGINE_RUN/v$n.miss"
         # The subscription ran out: no restart and no other server helps until it is renewed.
@@ -682,7 +688,7 @@ op_supervise() {
         restart_due "$n" "$name" || continue
         echo $((fails + 1)) > "$ENGINE_RUN/v$n.fails"
         stop_one "$n"
-        start_one "$n" && started=$((started + 1)) && log "restart_attempted $name on its adapter"
+        start_one "$n" && started=$((started + 1)) && log "restart_attempted $name on its adapter|reason=$restart_reason"
     done < "$TUNNELS"
     [ "$started" = 0 ] && echo "result=unchanged" || echo "result=changed"
 }

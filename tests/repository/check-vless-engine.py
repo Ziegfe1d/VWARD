@@ -56,6 +56,7 @@ echo "$*" >> "{tmp}/curl.log"
 out=; dev=; url=
 hdr=
 while [ $# -gt 0 ]; do case "$1" in -o) out=$2; shift ;; -D) hdr=$2; shift ;; --interface) dev=$2; shift ;; http*|telnet://*) url=$1 ;; esac; shift; done
+[ "$url" != http://1.0.0.1/cdn-cgi/trace ] || [ ! -e "{tmp}/secondary.$dev" ] || exit 0
 case "$url" in
     telnet://*) exit 1 ;;
     http://*:[0-9]*/) h=${{url#http://}}; h=${{h%:*}}; if [ -e "{tmp}/reach.$h" ]; then printf 0.042; exit 52; fi; printf 0.000000; exit 28 ;;
@@ -216,11 +217,20 @@ esac
     if engine("supervise") != ["result=unchanged"] or (run_ / "v0.pid").read_text() != pid1:
         fail("a working tunnel must be left alone")
     (tmp / "up.opkgtun1").unlink()
+    # The primary check can time out while the other check still answers on the tunnel.
+    (tmp / "secondary.opkgtun1").touch()
+    for _ in range(4):
+        if engine("supervise") != ["result=unchanged"] or (run_ / "v0.pid").read_text() != pid1:
+            fail("a reachable secondary check on the adapter must prevent a restart")
+    (tmp / "secondary.opkgtun1").unlink()
     # One silent minute is only marked; the second in a row restarts Xray.
     if engine("supervise") != ["result=unchanged"] or (run_ / "v0.pid").read_text() != pid1 or not (run_ / "v0.miss").exists():
         fail("one silent minute must not restart Xray")
     if engine("supervise") != ["result=changed"] or (run_ / "v0.pid").read_text() == pid1:
         fail("no page through a switched-on adapter: Xray must start afresh")
+    for reason in ("adapter_cycle", "both_probes_failed"):
+        if f"restart_attempted OpkgTun1 on its adapter|reason={reason}" not in (tmp / "engine.log").read_text():
+            fail(f"the restart cause must be logged: {reason}")
     # One decision, one agent: VWARD's tunnel for routes under the tunnel guard, or no internet
     # at the provider - the module does not restart Xray on its own, however long it is silent.
     prof = tmp / "profile.sh"
