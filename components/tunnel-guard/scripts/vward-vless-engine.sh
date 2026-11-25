@@ -261,12 +261,12 @@ parse() {
         }'
 }
 
-# brief FILE: «I<TAB>name<TAB>host<TAB>port» for the first 50 links, in ONE awk (the Panel's server
+# brief FILE [LIMIT [country]]: «I<TAB>name<TAB>host<TAB>port», 50 links by default (0: all).
 # list: a parse and five awks per server did not fit in 20 s on a Viva, owner 12.11.2026). A line
 # without a host or port is not a server (a subscription's note) and is left out; I stays the
 # link's own number, the one «select» takes.
 brief() {
-    LC_ALL=C awk '
+    LC_ALL=C awk -v limit="${2:-50}" -v country="${3:-}" '
         function dec(s,   o, i, c, h) {
             o = ""
             for (i = 1; i <= length(s); i++) {
@@ -277,7 +277,15 @@ brief() {
             }
             return o
         }
-        NR > 50 {exit}
+        function code(name,   prefix, alphabet, a, b) {
+            prefix = sprintf("%c%c%c", 240, 159, 135)
+            if (substr(name, 1, 3) != prefix || substr(name, 5, 3) != prefix) return "--"
+            alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            a = index(regional, substr(name, 4, 1)); b = index(regional, substr(name, 8, 1))
+            return a && b ? substr(alphabet, a, 1) substr(alphabet, b, 1) : "--"
+        }
+        BEGIN {if (country) for (v = 166; v <= 191; v++) regional = regional sprintf("%c", v)}
+        limit && NR > limit {exit}
         {
             i = index($0, "://"); if (!i) next
             s = substr($0, i + 3); frag = ""
@@ -289,10 +297,111 @@ brief() {
             if (substr(hp, 1, 1) == "[") { i = index(hp, "]"); host = substr(hp, 2, i - 2); port = substr(hp, i + 2) }
             else { i = index(hp, ":"); if (!i) next; host = substr(hp, 1, i - 1); port = substr(hp, i + 1) }
             if (host == "" || port !~ /^[0-9]+$/ || host ~ /[^A-Za-z0-9.:_-]/) next
-            name = dec(frag); gsub(/[|"\\\t]/, "", name)
-            print NR "\t" substr(name, 1, 64) "\t" host "\t" port
+            name = dec(frag)
+            tag = country ? "\t" code(name) : ""
+            gsub(/[|"\\[:cntrl:]]/, "", name)
+            print NR "\t" substr(name, 1, 64) "\t" host "\t" port tag
         }' "$1"
 }
+
+profile_name() {
+    printf '%s\n' "$1" | brief - | cut -f2
+}
+
+# Replace a root-only file on the same filesystem, so readers see a single version.
+replace_private() (
+    umask 077
+    rp_tmp=$(mktemp "$2.XXXXXX") || return 1
+    if [ ! -d "$2" ] && cat "$1" > "$rp_tmp" && mv -f "$rp_tmp" "$2"; then return 0; fi
+    rm -f "$rp_tmp"
+    return 1
+)
+
+# The private digest binds the displayed name/country to the actual Xray config. Never
+# send the digest (or the subscription credentials) to the Panel or the logs.
+save_applied() (
+    umask 077
+    [ -n "$2" ] && [ -n "$3" ] || return 1
+    sa_file="$ENGINE_ETC/v$1.applied"
+    [ ! -d "$sa_file" ] || return 1
+    sa_tmp=$(mktemp "$sa_file.XXXXXX") || return 1
+    trap 'rm -f "$sa_tmp"' EXIT
+    printf '%s\n' "$2" "$3" "$4" > "$sa_tmp" || return 1
+    if [ "${5:-}" = legacy ]; then
+        # A concurrent successful switch has priority over inference from an old cache.
+        ln "$sa_tmp" "$sa_file" 2>/dev/null || [ -f "$sa_file" ]
+    else
+        mv -f "$sa_tmp" "$sa_file"
+    fi
+)
+
+applied_facts() {
+    AP_CONF="$ENGINE_ETC/v$1.json" AP_KNOWN=0 AP_NAME= AP_ENDPOINT=
+    AP_SHA=$(sha256_of "$AP_CONF" 2>/dev/null)
+    [ -n "$AP_SHA" ] || return 0
+    if [ -f "$ENGINE_ETC/v$1.applied" ] && {
+        IFS= read -r ap_sha && IFS= read -r AP_ENDPOINT && IFS= read -r AP_NAME
+    } < "$ENGINE_ETC/v$1.applied" && [ "$ap_sha" = "$AP_SHA" ] && [ -n "$AP_ENDPOINT" ]; then
+        AP_KNOWN=1
+        return 0
+    fi
+    AP_NAME=
+    AP_ENDPOINT=$("$JQ" -r '.outbounds[] | select(.tag == "vless") |
+        (.settings.vnext[0] // .settings.servers[0]) |
+        select(.address != null and .port != null) | "\(.address):\(.port)"' "$AP_CONF" 2>/dev/null)
+}
+
+# An old install has no applied metadata. Resolve only when a single subscription
+# profile generates the installed config, including transport and credentials.
+find_applied() (
+    [ -n "$AP_ENDPOINT" ] && [ -r "$2" ] || return 1
+    fa_match=
+    for fa_index in $(brief "$2" 0 | awk -F '\t' -v endpoint="$AP_ENDPOINT" '$3 ":" $4 == endpoint {print $1}'); do
+        fa_link=$(sed -n "${fa_index}p" "$2")
+        [ "$AP_KNOWN" = 0 ] || [ "$(profile_name "$fa_link")" = "$AP_NAME" ] || continue
+        config "$fa_link" "$(adapter_of "$1")" "$3" && cmp -s "$3" "$AP_CONF" || continue
+        [ -z "$fa_match" ] || return 1
+        fa_match=$fa_index
+    done
+    [ -n "$fa_match" ] && [ "$(sha256_of "$AP_CONF" 2>/dev/null)" = "$AP_SHA" ] || return 1
+    printf '%s\n' "$fa_match"
+)
+
+# Keep the old, proven name before replacing the cache, including when the provider
+# removes the active profile. Respect a switch owned by a different process.
+cache_links() (
+    cl_cache="$ENGINE_ETC/v$1.links"
+    cl_lock="$ENGINE_RUN/v$1.failover"
+    if [ -s "$cl_cache" ] && { [ ! -d "$cl_lock" ] || [ "$(cat "$cl_lock/pid" 2>/dev/null)" = "$$" ]; }; then
+        applied_facts "$1"
+        if [ "$AP_KNOWN" = 0 ] && cp "$cl_cache" "$2.before" &&
+            cl_index=$(find_applied "$3" "$2.before" "$2.match"); then
+            cl_name=$(profile_name "$(sed -n "${cl_index}p" "$2.before")")
+            [ "$(sha256_of "$AP_CONF" 2>/dev/null)" != "$AP_SHA" ] ||
+                save_applied "$1" "$AP_SHA" "$AP_ENDPOINT" "$cl_name" legacy || return 1
+        fi
+    fi
+    replace_private "$2" "$cl_cache"
+)
+
+# Hash the exact private copy the client sees. The per-router random suffix
+# makes the public revision unusable for guessing subscription credentials.
+snapshot_links() (
+    umask 077
+    sl_key="$ENGINE_RUN/links.key"
+    if [ ! -s "$sl_key" ]; then
+        mkdir -p "$ENGINE_RUN" || return 1
+        sl_tmp=$(mktemp "$ENGINE_RUN/links-key.XXXXXX") || return 1
+        if dd if=/dev/urandom of="$sl_tmp" bs=32 count=1 2>/dev/null; then
+            ln "$sl_tmp" "$sl_key" 2>/dev/null || :
+        fi
+        rm -f "$sl_tmp"
+    fi
+    [ -s "$sl_key" ] && cp "$ENGINE_ETC/v$1.links" "$2" || return 1
+    sl_rev=$(cat "$2" "$sl_key" | sha256sum | cut -d' ' -f1)
+    [ "${#sl_rev}" = 64 ] || return 1
+    printf '%s\n' "$sl_rev"
+)
 
 # config LINK TUN OUT: the Xray configuration of the link on Keenetic's adapter TUN.
 config() {
@@ -566,7 +675,7 @@ op_add() {
     "$BIN" run -test -c "$ENGINE_ETC/v$n.json" >/dev/null 2>&1 || { rm -f "$ENGINE_ETC/v$n.json"; die conf_rejected; }
     host=$(parse "$link" | awk -F '\t' '$1 == "host" {print $2; exit}')
     port=$(parse "$link" | awk -F '\t' '$1 == "port" {print $2; exit}')
-    undo() { stop_one "$n"; ndm "no interface $name" >/dev/null 2>&1; rm -f "$ENGINE_ETC/v$n.json" "$ENGINE_RUN/v$n.err"; }
+    undo() { stop_one "$n"; ndm "no interface $name" >/dev/null 2>&1; rm -f "$ENGINE_ETC/v$n.json" "$ENGINE_ETC/v$n.applied" "$ENGINE_RUN/v$n.err"; }
     # A private address no home network uses (the benchmarking range), one /30 a tunnel.
     step router
     for c in "interface $name" "interface $name description \"$desc\"" "interface $name ip address 198.18.$k.1 255.255.255.252" \
@@ -589,10 +698,11 @@ op_add() {
         sleep 2
     done
     step save
+    save_applied "$n" "$(sha256_of "$ENGINE_ETC/v$n.json")" "$host:$port" "$(profile_name "$link")" || { undo; die write_failed; }
     ndm "system configuration save" || { undo; die config_save_failed; }
     printf '%s\t%s\t%s:%s\t%s\n' "$n" "$name" "$host" "$port" "$desc" >> "$TUNNELS"
     # Where the server came from (the subscription's address or the links) and which one it
-    # is: when it stops answering, failover moves the tunnel to another server of it.
+# is: when it stops answering, failover moves the tunnel to another server of it.
     (umask 077; grep -v '^#server=' "$file" > "$ENGINE_ETC/v$n.src" && cp "$TMPD/links" "$ENGINE_ETC/v$n.links" &&
         echo "${idx:-1}" > "$ENGINE_ETC/v$n.idx") 2>/dev/null || rm -f "$ENGINE_ETC/v$n.src"
     log "added $name slot=$n server=$host:$port"
@@ -608,7 +718,7 @@ op_remove() {
     stop_one "$n"
     ndm "no interface $1" && ndm "system configuration save" || die router_rejected
     rm -f "$ENGINE_ETC/v$n.json" "$ENGINE_ETC/v$n.off" "$ENGINE_RUN/v$n.err" "$ENGINE_ETC/v$n.src" "$ENGINE_ETC/v$n.links" \
-        "$ENGINE_ETC/v$n.idx" "$ENGINE_ETC/v$n.countries" "$ENGINE_RUN/v$n.fails" "$ENGINE_RUN/v$n.failover.at"
+        "$ENGINE_ETC/v$n.idx" "$ENGINE_ETC/v$n.applied" "$ENGINE_ETC/v$n.countries" "$ENGINE_RUN/v$n.fails" "$ENGINE_RUN/v$n.failover.at"
     awk -F'\t' -v p="$1" '$2 != p' "$TUNNELS" > "$TUNNELS.new" && mv -f "$TUNNELS.new" "$TUNNELS"
     log "removed $1"
     echo "result=changed"
@@ -737,11 +847,25 @@ op_kick() {
 
 # failover_busy SLOT: a failover is moving the tunnel right now (its lock, with a live pid).
 failover_busy() {
-    fp=$(cat "$ENGINE_RUN/v$1.failover/pid" 2>/dev/null)
-    case "$fp" in ''|*[!0-9]*) [ -d "$ENGINE_RUN/v$1.failover" ] && rm -rf "${ENGINE_RUN:?}/v$1.failover"; return 1 ;; esac
-    kill -0 "$fp" 2>/dev/null && return 0
-    rm -rf "${ENGINE_RUN:?}/v$1.failover"
+    fp_dir="$ENGINE_RUN/v$1.failover"
+    [ -d "$fp_dir" ] || return 1
+    fp=$(cat "$fp_dir/pid" 2>/dev/null)
+    # mkdir precedes writing the pid. A competing process must not reap a new lock.
+    case "$fp" in
+        ''|*[!0-9]*) [ -n "$(find "$fp_dir" -mmin +1 2>/dev/null)" ] || return 0; fp= ;;
+    esac
+    [ -z "$fp" ] || ! kill -0 "$fp" 2>/dev/null || return 0
+    rm -rf "$fp_dir"
     return 1
+}
+
+switch_cleanup() {
+    trap '' HUP INT TERM
+    if [ "${TS_TRIAL:-0}" = 1 ] && ! restore_server "$n"; then
+        log "server $switch_name: interrupted switch could not restore the previous server"
+    fi
+    rm -rf "${ENGINE_RUN:?}/v$n.failover"
+    cleanup
 }
 
 # failover_due SLOT: no failover found nothing within the last 30 minutes (every server
@@ -756,15 +880,16 @@ failover_due() {
 # (read again, or the copy kept when the address does not answer) are tried on the tunnel's
 # own adapter, servers of the same country first (the flag at the start of the name), at
 # most 8. The first that opens a page stays; none: the old server goes back.
-# try_server SLOT NAME I: server I of $TMPD/links on the tunnel; 0 = a page opens through it
-# (it stays, the tunnel's row and server number follow), else the tunnel keeps its config file
-# as it was before the call only when the caller puts it back.
+# try_server SLOT NAME I [auto]: 0=verified and recorded, 1=unsuitable, 2=write failed.
+# The caller restores the original config when a trial did not commit.
 try_server() {
     ts_l=$(sed -n "${3}p" "$TMPD/links")
     [ -n "$ts_l" ] || return 1
     config "$ts_l" "$(adapter_of "$2")" "$TMPD/c.json" 2>/dev/null || return 1
+    [ "${4:-}" != auto ] || ! cmp -s "$TMPD/c.json" "$TMPD/old.json" || return 1
     "$BIN" run -test -c "$TMPD/c.json" >/dev/null 2>&1 || return 1
-    (umask 077; cp "$TMPD/c.json" "$ENGINE_ETC/v$1.json") || return 1
+    replace_private "$TMPD/c.json" "$ENGINE_ETC/v$1.json" || return 2
+    TS_TRIAL=1
     stop_one "$1"
     start_one "$1" || return 1
     ts_w=0 ts_ok=0
@@ -776,10 +901,24 @@ try_server() {
     [ "$ts_ok" = 1 ] || return 1
     TS_HOST=$(parse "$ts_l" | awk -F '\t' '$1 == "host" {print $2; exit}')
     TS_PORT=$(parse "$ts_l" | awk -F '\t' '$1 == "port" {print $2; exit}')
-    echo "$3" > "$ENGINE_ETC/v$1.idx"
-    awk -F '\t' -v OFS='\t' -v p="$2" -v s="$TS_HOST:$TS_PORT" '$2 == p {$3 = s} {print}' "$TUNNELS" > "$TUNNELS.new" && mv -f "$TUNNELS.new" "$TUNNELS"
+    save_applied "$1" "$(sha256_of "$TMPD/c.json")" "$TS_HOST:$TS_PORT" "$(profile_name "$ts_l")" || return 2
+    TS_TRIAL=0
+    # Keep the legacy fields for downgrade. New readers use the config and applied metadata.
+    if ! { printf '%s\n' "$3" > "$TMPD/index" && replace_private "$TMPD/index" "$ENGINE_ETC/v$1.idx" &&
+        awk -F '\t' -v OFS='\t' -v p="$2" -v s="$TS_HOST:$TS_PORT" '$2 == p {$3 = s} {print}' "$TUNNELS" > "$TUNNELS.new" &&
+        mv -f "$TUNNELS.new" "$TUNNELS"; }; then
+        log "$2: applied server saved, legacy registry update failed"
+    fi
     rm -f "$ENGINE_RUN/v$1.fails" "$ENGINE_RUN/v$1.miss" "$ENGINE_RUN/v$1.failover.at"
     return 0
+}
+
+restore_server() {
+    [ "$TS_TRIAL" = 1 ] || return 0
+    TS_TRIAL=0
+    replace_private "$TMPD/old.json" "$ENGINE_ETC/v$1.json" || return 1
+    stop_one "$1"
+    start_one "$1"
 }
 
 # bell SEV TITLE TEXT NAME: a notification in the Panel's bell (the device profile's vward_note).
@@ -814,7 +953,8 @@ expired_wait() {
     ew_t=$(mktemp -d /tmp/vward-vless.XXXXXX 2>/dev/null) || return 0
     links "$ENGINE_ETC/v$1.src" "$ew_t/links"; ew_rc=$?
     case "$ew_rc" in
-        0) (umask 077; cp "$ew_t/links" "$ENGINE_ETC/v$1.links"); rm -rf "${ew_t:?}"; sub_state "$1" "$2" 0; return 1 ;;
+        0) cache_links "$1" "$ew_t/links" "$2" || { rm -rf "${ew_t:?}"; return 0; }
+           rm -rf "${ew_t:?}"; sub_state "$1" "$2" 0; return 1 ;;
         *) : > "$ENGINE_RUN/v$1.expired"; rm -rf "${ew_t:?}"; return 0 ;;
     esac
 }
@@ -832,12 +972,12 @@ tunnel_links() {
     # fetched again only when older or asked for («Обновить»), not on every look - up to 30 s and a
     # write to the USB drive each time (owner 12.11.2026, the servers did not load in 20 s).
     if [ "${TL_CACHED:-0}" = 1 ] && [ -s "$ENGINE_ETC/v$n.links" ] && [ -n "$(find "$ENGINE_ETC/v$n.links" -mmin -360 2>/dev/null)" ]; then
-        cp "$ENGINE_ETC/v$n.links" "$TMPD/links" && stubs_drop "$TMPD/links" && return 0
+        tl_rev=$(snapshot_links "$n" "$TMPD/links") && return 0
     fi
     [ ! -s "$ENGINE_ETC/v$n.src" ] || { links "$ENGINE_ETC/v$n.src" "$TMPD/links"; tl_rc=$?; }
     sub_state "$n" "$1" "$tl_rc"
-    if [ "$tl_rc" = 0 ]; then (umask 077; cp "$TMPD/links" "$ENGINE_ETC/v$n.links")
-    else cp "$ENGINE_ETC/v$n.links" "$TMPD/links" 2>/dev/null || die subscription_unavailable; stubs_drop "$TMPD/links"; fi
+    [ "$tl_rc" != 0 ] || cache_links "$n" "$TMPD/links" "$1" || die write_failed
+    tl_rev=$(snapshot_links "$n" "$TMPD/links" 2>/dev/null) || die subscription_unavailable
 }
 
 # list NAME: the servers of the tunnel's subscription as the VPN apps show them: name (with the
@@ -846,11 +986,16 @@ tunnel_links() {
 op_list() {
     TL_CACHED=1; [ "${2:-}" != fresh ] || TL_CACHED=0
     tunnel_links "$1"
-    cur=$(cat "$ENGINE_ETC/v$n.idx" 2>/dev/null); case "$cur" in ''|*[!0-9]*) cur=1 ;; esac
-    brief "$TMPD/links" > "$TMPD/brief"
+    cur=0
+    if [ ! -d "$ENGINE_RUN/v$n.failover" ]; then
+        applied_facts "$n"
+        cur=$(find_applied "$1" "$TMPD/links" "$TMPD/match") || cur=0
+    fi
+    brief "$TMPD/links" 0 | awk -F '\t' -v cur="$cur" '$1 <= 50 || $1 == cur' > "$TMPD/brief"
     tab=$(printf '\t') last=0 k=0
-    while IFS="$tab" read -r j nm h pt; do
-        [ -n "$j" ] || continue
+    while IFS= read -r srv; do
+        j=${srv%%"$tab"*} srv=${srv#*"$tab"}
+        srv=${srv#*"$tab"} h=${srv%%"$tab"*} pt=${srv#*"$tab"}
         last=$j k=$((k + 1))
         # Sixteen at a time: a TCP connection each, at most 2 s. A plain HTTP request: Entware's curl
         # has no telnet:// (every server was «not answering», Viva 2026-10-11); the connection
@@ -862,15 +1007,20 @@ op_list() {
         [ $((k % 16)) != 0 ] || wait
     done < "$TMPD/brief"
     wait
-    while IFS="$tab" read -r j nm h pt; do
-        [ -n "$j" ] || continue
+    if [ "$cur" != 0 ] && { [ -d "$ENGINE_RUN/v$n.failover" ] || [ "$(sha256_of "$AP_CONF" 2>/dev/null)" != "$AP_SHA" ]; }; then
+        cur=0
+    fi
+    while IFS= read -r srv; do
+        j=${srv%%"$tab"*} srv=${srv#*"$tab"}
+        nm=${srv%%"$tab"*} srv=${srv#*"$tab"}
+        h=${srv%%"$tab"*} pt=${srv#*"$tab"}
         ms=$(awk '{t = $1 * 1000; if (t > 0) printf "%d", t + 0.5}' "$TMPD/ms.$j" 2>/dev/null)
         why=; [ -n "$ms" ] || case "$(cat "$TMPD/rc.$j" 2>/dev/null)" in 6) why=dns ;; 7) why=refused ;; *) why=timeout ;; esac
         printf 'info.server.%s=%s|%s|%s|%s|%s|%s\n' "$j" "$nm" "$h" "$pt" "$ms" "$([ "$j" = "$cur" ] && echo 1 || echo 0)" "$why"
     done < "$TMPD/brief"
     i=$last
     co_cross=$(countries_get "$n" cross)
-    printf 'info.current=%s\ninfo.servers=%s\ninfo.countries.off=%s\ninfo.countries.cross=%s\n' "$cur" "$i" "$(countries_get "$n" off)" "${co_cross:-0}"
+    printf 'info.current=%s\ninfo.revision=%s\ninfo.servers=%s\ninfo.countries.off=%s\ninfo.countries.cross=%s\n' "$cur" "$tl_rev" "$i" "$(countries_get "$n" off)" "${co_cross:-0}"
     echo "result=checked"
 }
 
@@ -878,23 +1028,31 @@ op_list() {
 # otherwise it stays on its server.
 op_select() {
     case "$2" in ''|*[!0-9]*) die invalid_value 64 ;; esac
-    tunnel_links "$1"
-    [ "$2" -ge 1 ] && [ -n "$(sed -n "${2}p" "$TMPD/links")" ] || die invalid_value 64
-    cur=$(cat "$ENGINE_ETC/v$n.idx" 2>/dev/null); case "$cur" in ''|*[!0-9]*) cur=1 ;; esac
+    row=$(row_of "$1")
+    [ -n "$row" ] || die unknown_tunnel 64
+    n=$(printf '%s' "$row" | cut -f1)
     failover_busy "$n" && die engine_busy 75
     mkdir -p "$ENGINE_RUN" && mkdir "$ENGINE_RUN/v$n.failover" 2>/dev/null || die engine_busy 75
-    echo $$ > "$ENGINE_RUN/v$n.failover/pid"
-    trap 'rm -rf "${ENGINE_RUN:?}/v$n.failover"; cleanup' EXIT
+    switch_name=$1
+    trap switch_cleanup EXIT
+    trap 'exit 130' HUP INT TERM
+    printf '%s\n' "$$" > "$ENGINE_RUN/v$n.failover/pid" || die write_failed
+    TMPD=$(mktemp -d /tmp/vward-vless.XXXXXX 2>/dev/null) || die temporary_file_unavailable
+    sel_rev=$(snapshot_links "$n" "$TMPD/links" 2>/dev/null) || die subscription_unavailable
+    [ -z "${3:-}" ] || [ "$3" = "$sel_rev" ] || die server_list_changed
+    [ "$2" -ge 1 ] && [ -n "$(sed -n "${2}p" "$TMPD/links")" ] || die invalid_value 64
+    applied_facts "$n"
+    cur=$(find_applied "$1" "$TMPD/links" "$TMPD/match") || cur=unknown
     cp "$ENGINE_ETC/v$n.json" "$TMPD/old.json" || die write_failed
+    TS_TRIAL=0
     if try_server "$n" "$1" "$2"; then
         log "server $1: server $cur -> server $2 $TS_HOST:$TS_PORT (chosen in the Panel)"
         printf 'info.server=%s\ninfo.host=%s:%s\n' "$2" "$TS_HOST" "$TS_PORT"
         echo "result=changed"
         return 0
-    fi
-    (umask 077; cp "$TMPD/old.json" "$ENGINE_ETC/v$n.json")
-    stop_one "$n"
-    start_one "$n"
+    else sel_rc=$?; fi
+    restore_server "$n" || die rollback_failed
+    [ "$sel_rc" != 2 ] || die write_failed
     log "server $1: server $2 did not answer, server $cur kept"
     die server_unreachable
 }
@@ -902,11 +1060,11 @@ op_select() {
 # Countries of a tunnel's servers (fix.28.2): the owner switches countries off and decides whether
 # a failover may move to another country. $ENGINE_ETC/vSLOT.countries: «off=DE NL» (two-letter
 # codes from the flag at the start of a server's name; «--» for servers without a flag) and
-# «cross=0|1» (1 by default: any country that is on).
+# «cross=0|1» (0 by default: stay in the applied server's country).
 # cc NAME: the country code of a server's name.
 cc() {
     printf '%s' "$1" | LC_ALL=C od -An -tu1 -N8 | awk '{for (i = 1; i <= NF; i++) b[i] = $i}
-        END {if (b[1] == 240 && b[2] == 159 && b[3] == 135 && b[4] >= 166 && b[4] <= 191 && b[5] == 240 && b[8] >= 166 && b[8] <= 191)
+        END {if (b[1] == 240 && b[2] == 159 && b[3] == 135 && b[4] >= 166 && b[4] <= 191 && b[5] == 240 && b[6] == 159 && b[7] == 135 && b[8] >= 166 && b[8] <= 191)
                  printf "%c%c\n", b[4] - 101, b[8] - 101; else print "--"}'
 }
 countries_get() { sed -n "s/^$2=//p" "$ENGINE_ETC/v$1.countries" 2>/dev/null | tail -n 1; }
@@ -945,9 +1103,11 @@ op_failover() {
     mkdir -p "$ENGINE_RUN" || die write_failed
     failover_busy "$n" && { echo "result=unchanged"; return 0; }
     mkdir "$ENGINE_RUN/v$n.failover" 2>/dev/null || { echo "result=unchanged"; return 0; }
-    echo $$ > "$ENGINE_RUN/v$n.failover/pid"
-    TMPD=$(mktemp -d /tmp/vward-vless.XXXXXX 2>/dev/null) || { rm -rf "${ENGINE_RUN:?}/v$n.failover"; die temporary_file_unavailable; }
-    trap 'rm -rf "${ENGINE_RUN:?}/v$n.failover"; cleanup' EXIT
+    switch_name=$1
+    trap switch_cleanup EXIT
+    trap 'exit 130' HUP INT TERM
+    printf '%s\n' "$$" > "$ENGINE_RUN/v$n.failover/pid" || die write_failed
+    TMPD=$(mktemp -d /tmp/vward-vless.XXXXXX 2>/dev/null) || die temporary_file_unavailable
     links "$ENGINE_ETC/v$n.src" "$TMPD/links"; fo_rc=$?
     sub_state "$n" "$1" "$fo_rc"
     if [ "$fo_rc" = 4 ]; then
@@ -957,36 +1117,49 @@ op_failover() {
         echo "result=unchanged"
         return 0
     fi
-    if [ "$fo_rc" = 0 ]; then (umask 077; cp "$TMPD/links" "$ENGINE_ETC/v$n.links")
-    else cp "$ENGINE_ETC/v$n.links" "$TMPD/links" 2>/dev/null || die subscription_unavailable; stubs_drop "$TMPD/links"; fi
-    cur=$(cat "$ENGINE_ETC/v$n.idx" 2>/dev/null); case "$cur" in ''|*[!0-9]*) cur=1 ;; esac
-    # The flag: two regional indicator symbols, 8 bytes of UTF-8 (F0 9F 87 ..).
-    nm() { parse "$1" 2>/dev/null | awk -F '\t' '$1 == "name" {print substr($0, 6); exit}'; }
-    flag=$(nm "$(sed -n "${cur}p" "$TMPD/links")" | LC_ALL=C cut -b1-8)
-    case "$flag" in "$(printf '\360\237\207')"*) ;; *) flag= ;; esac
+    if [ "$fo_rc" = 0 ]; then cache_links "$n" "$TMPD/links" "$1" || die write_failed
+    else cp "$ENGINE_ETC/v$n.links" "$TMPD/links" 2>/dev/null || die subscription_unavailable; fi
+    applied_facts "$n"
+    cur=$(find_applied "$1" "$TMPD/links" "$TMPD/match") || cur=unknown
+    if [ "$AP_KNOWN" = 0 ] && [ "$cur" != unknown ]; then
+        AP_NAME=$(profile_name "$(sed -n "${cur}p" "$TMPD/links")")
+        AP_KNOWN=1
+    fi
     # Countries switched off are never tried; without «cross» (off by default, owner 13.11.2026) only
-    # the same country. A server without a flag has no known country: every server, as before.
+    # the same country. An identified server without a flag can use any enabled country.
     fo_off=" $(countries_get "$n" off) " fo_cross=$(countries_get "$n" cross)
-    i=0
-    while IFS= read -r l; do
-        i=$((i + 1))
-        [ "$i" != "$cur" ] || continue
-        case "$fo_off" in "  ") ;; *) case "$fo_off" in *" $(cc "$(nm "$l")") "*) continue ;; esac ;; esac
-        if [ -n "$flag" ] && [ "$(nm "$l" | LC_ALL=C cut -b1-8)" = "$flag" ]; then echo "$i" >> "$TMPD/same"
-        elif [ -z "$flag" ] || [ "${fo_cross:-0}" != 0 ]; then echo "$i" >> "$TMPD/other"; fi
-    done < "$TMPD/links"
-    cat "$TMPD/same" "$TMPD/other" 2>/dev/null | head -n "${VWARD_VLESS_FAILOVER_MAX:-8}" > "$TMPD/try"
+    if [ "$AP_KNOWN" = 0 ] && [ "${fo_cross:-0}" = 0 ]; then
+        date +%s > "$ENGINE_RUN/v$n.failover.at"
+        log "failover $1: applied server country could not be verified, current server kept"
+        printf 'info.failover=country_unknown\nresult=unchanged\n'
+        return 0
+    fi
+    fo_country=$(cc "$AP_NAME")
+    brief "$TMPD/links" 0 country | awk -F '\t' -v cur="$cur" -v country="$fo_country" \
+        -v cross="${fo_cross:-0}" -v off="$fo_off" -v max="${VWARD_VLESS_FAILOVER_MAX:-8}" '
+        $1 != cur && !index(off, " " $5 " ") {
+            if (country != "--" && $5 == country) {if (ns < max) same[++ns] = $1}
+            else if ((country == "--" || cross != 0) && no < max) other[++no] = $1
+        }
+        END {
+            for (i = 1; i <= ns && i <= max; i++) print same[i]
+            for (i = 1; i <= no && ns+i <= max; i++) print other[i]
+        }' > "$TMPD/try"
     cp "$ENGINE_ETC/v$n.json" "$TMPD/old.json" || die write_failed
+    TS_TRIAL=0
     while IFS= read -r i; do
-        try_server "$n" "$1" "$i" || continue
+        try_server "$n" "$1" "$i" auto
+        case "$?" in
+            0) ;;
+            2) restore_server "$n" || die rollback_failed; die write_failed ;;
+            *) continue ;;
+        esac
         log "failover $1: server $cur did not answer, now server $i $TS_HOST:$TS_PORT"
         printf 'info.server=%s\ninfo.host=%s:%s\n' "$i" "$TS_HOST" "$TS_PORT"
         echo "result=changed"
         return 0
     done < "$TMPD/try"
-    (umask 077; cp "$TMPD/old.json" "$ENGINE_ETC/v$n.json")
-    stop_one "$n"
-    start_one "$n"
+    restore_server "$n" || die rollback_failed
     date +%s > "$ENGINE_RUN/v$n.failover.at"
     log "failover $1: no other server of the subscription answers, server $cur kept"
     echo "info.failover=none"
@@ -1041,10 +1214,22 @@ op_status() {
     [ -f "$TUNNELS" ] && while IFS="$(printf '\t')" read -r n name server desc; do
         p=$(pid_of "$n") || :
         rss=; [ -z "$p" ] || rss=$(awk '/^VmRSS:/ {print $2}' "/proc/$p/status" 2>/dev/null)
-        # The current server's own name in the subscription («Norway-14s(ws)»), for the Panel.
-        ci=$(cat "$ENGINE_ETC/v$n.idx" 2>/dev/null); case "$ci" in ''|*[!0-9]*) ci=1 ;; esac
-        sname=$(sed -n "${ci}p" "$ENGINE_ETC/v$n.links" 2>/dev/null | head -n 1)
-        [ -z "$sname" ] || sname=$(parse "$sname" 2>/dev/null | awk -F '\t' '$1 == "name" {print substr($0, 6); exit}' | tr -d '\t|"\\' | cut -c1-64)
+        sname=
+        if [ ! -d "$ENGINE_RUN/v$n.failover" ]; then
+            applied_facts "$n"
+            if [ "$AP_KNOWN" = 1 ]; then sname=$AP_NAME
+            elif [ -r "$ENGINE_ETC/v$n.links" ]; then
+                sname=$(
+                    TMPD=$(mktemp -d /tmp/vward-vless.XXXXXX) || exit 1
+                    trap cleanup EXIT
+                    cp "$ENGINE_ETC/v$n.links" "$TMPD/links" || exit 1
+                    ci=$(find_applied "$name" "$TMPD/links" "$TMPD/match") || exit 1
+                    profile_name "$(sed -n "${ci}p" "$TMPD/links")"
+                )
+            fi
+            [ -d "$ENGINE_RUN/v$n.failover" ] && sname= ||
+                server=${AP_ENDPOINT:-$server}
+        fi
         printf 'tunnel=%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$([ -n "$p" ] && echo 1 || echo 0)" "$rss" "$server" "$desc" "$([ -e "$ENGINE_ETC/v$n.off" ] && echo 1 || echo 0)" "$sname"
     done < "$TUNNELS"
     echo "result=status"
@@ -1086,7 +1271,7 @@ case "${1:-}" in
     start) [ "$#" -eq 2 ] || die usage 64; op_start "$2" ;;
     failover) [ "$#" -eq 2 ] || die usage 64; op_failover "$2" ;;
     list) [ "$#" -ge 2 ] && [ "$#" -le 3 ] || die usage 64; op_list "$2" "${3:-}" ;;
-    select) [ "$#" -eq 3 ] || die usage 64; op_select "$2" "$3" ;;
+    select) [ "$#" -eq 3 ] || [ "$#" -eq 4 ] || die usage 64; op_select "$2" "$3" "${4:-}" ;;
     countries) [ "$#" -eq 2 ] || [ "$#" -eq 4 ] || die usage 64; op_countries "$2" "${3:-}" "${4:-}" ;;
     disable) [ "$#" -eq 2 ] || die usage 64; op_disable "$2"; sentinel_reload ;;
     enable) [ "$#" -eq 2 ] || die usage 64; op_enable "$2"; sentinel_reload ;;
