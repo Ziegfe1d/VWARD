@@ -23,6 +23,7 @@ on:
       - '.github/workflows/updater-ci.yml'
       - 'SHA256SUMS'
       - 'tools/vward-core/**'
+      - 'tools/vward-dns/**'
 
 permissions:
   contents: read
@@ -34,6 +35,27 @@ permissions:
 # 3 594 here and on 24.04) and a copy of `sleep` under another name stopped working. A move to a
 # newer image is a decision of its own: measure there first, then record the new numbers.
 jobs:
+  vward-dns-pilot:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.1"
+          cache-dependency-path: tools/vward-dns/go.sum
+      - name: Test DNS listener and trial rollback
+        run: |
+          (cd tools/vward-dns && go vet ./... && go test -race -count=1 ./...)
+          python3 tools/vward-dns/test-pilot.py
+      - name: Build pilot
+        run: tools/vward-dns/build.sh "$RUNNER_TEMP/vward-dns"
+      - name: Keep pilot build with the checked commit
+        uses: actions/upload-artifact@v4
+        with:
+          name: vward-dns-pilot
+          path: ${{ runner.temp }}/vward-dns
+          if-no-files-found: error
+
   routing-core-go:
     runs-on: ubuntu-24.04
     steps:
