@@ -3,6 +3,7 @@
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 
@@ -11,6 +12,8 @@ ROOT = HERE.parents[1]
 DOMAINS = ("youtube.com", "youtu.be", "youtube-nocookie.com", "googlevideo.com",
            "ytimg.com", "ggpht.com", "instagram.com", "cdninstagram.com")
 OLD = sorted(f"ip name-server {ip} {d} on OpkgTun0" for ip in ("1.1.1.1", "8.8.8.8") for d in DOMAINS)
+BUSYBOX = shutil.which("busybox")
+SHELL = [BUSYBOX, "sh"] if BUSYBOX else ["sh"]
 
 with tempfile.TemporaryDirectory() as temp:
     fake = Path(temp)
@@ -38,8 +41,16 @@ else:
     assert cmd.startswith('ip name-server '), cmd
     rules.add(cmd)
 state.write_text('\n'.join(sorted(rules)) + '\n')
-local = [r.split()[2:4] for r in rules if r.startswith('ip name-server 127.0.0.1:65153 ')]
-(d / 'live').write_text(''.join(f'dns_server = {ip} {name}\n' for ip, name in local))
+local = [r for r in rules if r.startswith('ip name-server 127.0.0.1:65153 ')]
+target = 'ip name-server 1.1.1.1 cdninstagram.com on OpkgTun0'
+lost = d / 'lost-live-rule'
+if cmd == target:
+    if local and os.environ.get('PILOT_DROP_DURING_RESTORE') == '1':
+        lost.touch()
+    elif not local and os.environ.get('PILOT_DROP_PERSISTS') != '1':
+        lost.unlink(missing_ok=True)
+active = [r.split()[2:4] for r in sorted(rules) if r != target or not lost.exists()]
+(d / 'live').write_text(''.join(f'dns_server = {ip if ":" in ip else ip + ":53"} {name}.\n' for ip, name in active))
 if os.environ.get('PILOT_LOST_REPLY') == '1' and cmd == 'no ip name-server 1.1.1.1 cdninstagram.com on OpkgTun0':
     sys.exit(1)
 """)
@@ -64,14 +75,22 @@ esac
     pending = fake / "opt/var/lib/vward/dns-pilot/pending"
 
     def call(action, **settings):
-        return subprocess.run(["sh", str(HERE / "pilot.sh"), action], env=env | settings,
+        return subprocess.run(SHELL + [str(HERE / "pilot.sh"), action], env=env | settings,
                               text=True, capture_output=True, timeout=60)
+
+    def set_rules(rules):
+        state.write_text("\n".join(rules) + "\n")
+        entries = [r.split()[2:4] for r in sorted(rules)]
+        live.write_text("".join(f"dns_server = {ip} {name}\n" for ip, name in entries))
 
     def assert_restored():
         assert sorted(state.read_text().splitlines()) == OLD
+        active = sorted(f"ip name-server {server.removesuffix(':53')} {name.rstrip('.')} on OpkgTun0"
+                        for _, _, server, name in map(str.split, live.read_text().splitlines()))
+        assert active == OLD, active
         assert not pending.exists()
 
-    state.write_text("\n".join(OLD) + "\n")
+    set_rules(OLD)
     result = call("plan")
     assert result.returncode == 0 and "plan_ready" in result.stdout, result
     assert not (fake / "mutations").exists(), "planning wrote the router"
@@ -79,13 +98,37 @@ esac
     result = call("trial")
     assert result.returncode and "dns_scope_differs_from_expected" in result.stderr, result
     assert not (fake / "mutations").exists(), "pilot touched a foreign DNS rule"
-    state.write_text("\n".join(OLD) + "\n")
+    set_rules(OLD)
+
+    # A correct running-config can coexist with only one active DNS rule.
+    live.write_text("dns_server = 8.8.8.8 youtube.com\n")
+    result = call("plan")
+    assert result.returncode and "legacy_live_rules_unverified" in result.stderr, result
+    result = call("trial")
+    assert result.returncode and "legacy_live_rules_unverified" in result.stderr, result
+    assert not (fake / "mutations").exists(), "an unverified live baseline was changed"
+    set_rules(OLD)
 
     result = call("trial")
     assert (result.returncode == 0 and "result=trial_verified" in result.stdout
             and "result=original_dns_configuration_restored" in result.stdout), result
     assert_restored()
-    (fake / "forwarded").unlink()
+
+    (fake / "forwarded").unlink(missing_ok=True)
+    result = call("trial", PILOT_DROP_DURING_RESTORE="1")
+    assert result.returncode == 0 and "original_dns_configuration_restored" in result.stdout, result
+    assert not (fake / "lost-live-rule").exists(), "rollback left a configured rule inactive"
+    assert_restored()
+
+    (fake / "forwarded").unlink(missing_ok=True)
+    result = call("trial", PILOT_DROP_DURING_RESTORE="1", PILOT_DROP_PERSISTS="1")
+    assert result.returncode and "dns_restore_unverified" in result.stderr, result
+    assert "original_dns_configuration_restored" not in result.stdout and pending.exists(), result
+    result = call("restore")
+    assert result.returncode == 0, result
+    assert not (fake / "lost-live-rule").exists(), "manual recovery did not restore live DNS"
+    assert_restored()
+    (fake / "forwarded").unlink(missing_ok=True)
     result = call("trial", PILOT_LOST_REPLY="1")
     assert result.returncode and "attach_failed" in result.stderr, result
     assert_restored()
@@ -98,7 +141,7 @@ esac
 
     # A detached recovery has the same effect if the shell was killed before cleanup.
     pending.write_text("\n".join(OLD) + "\n")
-    state.write_text("\n".join([*OLD[1:], "ip name-server 127.0.0.1:65153 cdninstagram.com"]) + "\n")
+    set_rules([*OLD[1:], "ip name-server 127.0.0.1:65153 cdninstagram.com"])
     result = call("restore")
     assert result.returncode == 0, result
     assert_restored()

@@ -86,6 +86,11 @@ restore() {
         ndm "no $rule" || :
     done < "$WORK/diff"
     snapshot "$WORK/current" && cmp -s "$WORK/current" "$WORK/before" || return 1
+    # An accepted Keenetic command can leave rules inactive in ndnproxy. Keep
+    # the recovery record until the previous rules are back in both places.
+    if ! wait_live_rules "$WORK/before"; then
+        repair_legacy_live || return 1
+    fi
     rm -f "$STATE/pending"
 }
 
@@ -105,16 +110,49 @@ cleanup() {
     exit "$status"
 }
 
-live_rules() {
+read_live_rules() {
     live_file=
     for live in ${VWARD_NDNPROXY_CONF:-/var/ndnproxymain.conf /tmp/ndnproxymain.conf}; do
         [ ! -r "$live" ] || { live_file=$live; break; }
     done
     [ -n "$live_file" ] || return 1
-    awk -v upstream="127.0.0.1:$PORT" '
-        $1 == "dns_server" && $2 == "=" && $3 == upstream {print "ip name-server " $3 " " tolower($4)}
-    ' "$live_file" | LC_ALL=C sort > "$WORK/live"
-    cmp -s "$WORK/live" "$WORK/pilot"
+    awk -v domains="$DOMAINS" -v upstream="127.0.0.1:$PORT" -v iface="$TUNNEL" '
+        BEGIN {n = split(domains, names, "\n"); for (i = 1; i <= n; i++) selected[names[i]] = 1}
+        $1 == "dns_server" && $2 == "=" {
+            name = tolower($4); sub(/\.$/, "", name)
+            if (!selected[name]) next
+            if ($3 == upstream) {print "ip name-server " $3 " " name; next}
+            address = $3; sub(/:53$/, "", address)
+            if (address == "1.1.1.1" || address == "8.8.8.8")
+                print "ip name-server " address " " name " on " iface
+            else
+                print "unexpected live DNS upstream " name
+        }
+    ' "$live_file" > "$WORK/live-unsorted" || return 1
+    LC_ALL=C sort "$WORK/live-unsorted" > "$WORK/live"
+}
+
+wait_live_rules() {
+    live_left=5
+    until read_live_rules && cmp -s "$WORK/live" "$1"; do
+        [ "$live_left" -gt 0 ] || return 1
+        live_left=$((live_left - 1))
+        sleep 1
+    done
+}
+
+repair_legacy_live() {
+    read_live_rules && [ -s "$WORK/live" ] || return 1
+    comm -23 "$WORK/live" "$WORK/before" > "$WORK/diff" && [ ! -s "$WORK/diff" ] || return 1
+    cp "$WORK/live" "$WORK/live-before-repair" || return 1
+    snapshot "$WORK/current" && cmp -s "$WORK/current" "$WORK/before" || return 1
+    read_live_rules && cmp -s "$WORK/live" "$WORK/live-before-repair" || return 1
+    comm -23 "$WORK/before" "$WORK/live" > "$WORK/diff" && [ -s "$WORK/diff" ] || return 1
+    while IFS= read -r rule; do
+        ndm "no $rule" || :
+        ndm "$rule" || :
+    done < "$WORK/diff"
+    snapshot "$WORK/current" && cmp -s "$WORK/current" "$WORK/before" && wait_live_rules "$WORK/before"
 }
 
 [ "$#" = 1 ] || fail usage
@@ -147,7 +185,8 @@ done | LC_ALL=C sort > "$WORK/pilot"
 LC_ALL=C sort "$WORK/before" "$WORK/pilot" > "$WORK/allowed"
 if [ "$1" = plan ]; then
     snapshot "$WORK/current" && cmp -s "$WORK/current" "$WORK/before" || fail dns_scope_differs_from_expected
-    echo "result=plan_ready tunnel=$TUNNEL port=$PORT domains=8 current_rules=16"
+    read_live_rules && cmp -s "$WORK/live" "$WORK/before" || fail legacy_live_rules_unverified
+    echo "result=plan_ready tunnel=$TUNNEL port=$PORT domains=8 current_rules=16 active_rules=16"
     exit 0
 fi
 
@@ -168,6 +207,7 @@ fi
 
 [ ! -e "$STATE/pending" ] && [ ! -L "$STATE/pending" ] || fail prior_trial_requires_restore
 snapshot "$WORK/current" && cmp -s "$WORK/current" "$WORK/before" || fail dns_scope_differs_from_expected
+read_live_rules && cmp -s "$WORK/live" "$WORK/before" || fail legacy_live_rules_unverified
 "$BIN" probe -port "$PORT" || fail local_resolver_failed
 "$BIN" health -port "$PORT" >/dev/null || fail local_health_unverified
 mkdir -p "$STATE" && [ -d "$STATE" ] && [ ! -L "$STATE" ] && [ -O "$STATE" ] || fail unsafe_state_directory
@@ -180,12 +220,7 @@ UNDO=1
 while IFS= read -r rule; do ndm "$rule" || fail attach_failed; done < "$WORK/pilot"
 while IFS= read -r rule; do ndm "no $rule" || fail attach_failed; done < "$WORK/before"
 snapshot "$WORK/current" && cmp -s "$WORK/current" "$WORK/pilot" || fail attachment_unverified
-left=5
-until live_rules; do
-    [ "$left" -gt 0 ] || fail live_dns_attachment_unverified
-    left=$((left - 1))
-    sleep 1
-done
+wait_live_rules "$WORK/pilot" || fail live_dns_attachment_unverified
 counts=$("$BIN" health -port "$PORT") || fail local_health_unverified
 "$BIN" probe -port 53 || fail keenetic_probe_failed
 counts_after=$("$BIN" health -port "$PORT") || fail local_health_unverified
