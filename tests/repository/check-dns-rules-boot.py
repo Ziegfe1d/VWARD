@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """DNS rules of the tunnel after a boot (fix.34.1, r6; «vward-tunnel-health.sh dns-rules» from the components agent since 16.11.2026). 25.10 after a reboot the live
 ndnproxymain.conf had 1 of the 16 «ip name-server ... on OpkgTun4» lines of the configuration;
-Instagram did not resolve until «no» and the same line again. tunnel-health checks once a boot
-(router up 5 minutes, tunnel UP): the missing lines are given again and logged, the next minute
-checks again (3 tries); no live file - nothing is done; all there - «ok», resolving checked."""
+Instagram did not resolve until «no» and the same line again. With the router up for 5 minutes
+and the tunnel up, missing lines are given again and checked next minute (3 tries). A live DNS
+configuration change invalidates the previous success, including between tunnel reconnects."""
 
 import re
 import shutil
@@ -14,7 +14,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SRC = (ROOT / "components/tunnel-guard/scripts/vward-tunnel-health.sh").read_text()
 SUP = (ROOT / "components/runtime/scripts/vward-cron-supervisor.sh").read_text()
-SH = ["busybox", "sh"] if shutil.which("busybox") else ["sh"]
+BUSYBOX = shutil.which("busybox")
+SH = [BUSYBOX, "sh"] if BUSYBOX else ["sh"]
 
 
 def fail(message: str) -> None:
@@ -32,6 +33,7 @@ if SRC.index('if [ "${1:-}" = dns-rules ]; then') > SRC.index("vward_component_g
 if "dns_rules_tick()" not in SUP or "|| dns_rules_tick" not in SUP or '"$DNS_RULES_BIN" dns-rules' not in SUP:
     fail("the components agent must run the check once a minute")
 FUNC = m.group(0)
+TICK = re.search(r"^dns_rules_tick\(\)\n\{\n.*?^\}\n", SUP, re.S | re.M).group(0)
 
 DOMAINS = ["youtube.com", "youtu.be", "youtube-nocookie.com", "googlevideo.com", "ytimg.com", "ggpht.com",
            "instagram.com", "cdninstagram.com"]
@@ -57,15 +59,23 @@ with tempfile.TemporaryDirectory() as tmp:
                                   f"vward_running_config() {{ cat {t}/config; }}\n"
                                   f"ndmc() {{ echo \"$2\" >> {t}/ndmc.log; }}\n")
     (t / "sys/opkgtun0").mkdir(parents=True)
+    (t / "tmp").mkdir()
     env = {"PATH": f"{t}:/usr/bin:/bin", "VWARD_PROFILE_LIB": str(t / "profile.sh"), "VWARD_SYSFS_NET": str(t / "sys"),
            "VWARD_UPTIME_FILE": str(t / "uptime"), "VWARD_NDNPROXY_CONF": str(t / "live.conf"), "VWARD_DOMAIN_LISTS_CONF": str(t / "lists.conf"),
-           "VWARD_DNS_RULES_STATE": str(t / "state"), "VWARD_DNS_RULES_LOG": str(t / "log"), "VWARD_NSLOOKUP": "true"}
+           "VWARD_DNS_RULES_STATE": str(t / "state"), "VWARD_DNS_RULES_LOG": str(t / "log"), "VWARD_NSLOOKUP": "true",
+           "VWARD_ROOT_PREFIX": str(t),
+           "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh")}
     script = ROOT / "components/tunnel-guard/scripts/vward-tunnel-health.sh"
     (t / "sys/opkgtun0/flags").write_text("0x1002\n")
     subprocess.run(SH + [str(script), "dns-rules"], env=env, timeout=60)
     if (t / "state").exists() or (t / "ndmc.log").exists():
         fail("a tunnel that is down: nothing looked at")
     (t / "sys/opkgtun0/flags").write_text("0x1003\n")
+    (t / "tmp/vward-update-requested").touch()
+    subprocess.run(SH + [str(script), "dns-rules"], env=env, timeout=60)
+    if (t / "state").exists() or (t / "ndmc.log").exists():
+        fail("a pending update must block DNS repair")
+    (t / "tmp/vward-update-requested").unlink()
     r = subprocess.run(SH + [str(script), "dns-rules"], env=env, text=True, capture_output=True, timeout=60)
     sent = (t / "ndmc.log").read_text().splitlines() if (t / "ndmc.log").exists() else []
     if r.returncode != 0 or len(sent) != 30 or "RESULT=reapplied" not in (t / "state").read_text():
@@ -79,15 +89,16 @@ with tempfile.TemporaryDirectory() as tmp:
     (t / "nslookup").write_text("#!/bin/sh\nprintf 'Server: 127.0.0.1\\n\\nName: %s\\nAddress 1: 157.240.0.35\\n' \"$1\"\n")
     (t / "nslookup").chmod(0o755)
 
-    def run(uptime: int = 900, conf: str | None = "") -> tuple[str, list[str], str]:
+    def run(uptime: int = 900, conf: str | None = "", rebuild: bool = False) -> tuple[str, list[str], str]:
         (t / "ndmc.log").write_text("")
         (t / "uptime").write_text(f"{uptime}.10 100.00\n")
         live_path = str(t / "ndnproxymain.conf") if conf is not None else str(t / "none.conf")
+        replace_live = f'cp "{t}/next-live.conf" "{live_path}";' if rebuild else ""
         script = f"""PATH="{t}:$PATH"
 NOW_EPOCH=1761400000; NOW_TEXT="2026-10-25 15:15:00"; LOG="{t}/health.log"; VWARD_TUNNEL_INTERFACE=OpkgTun4
 VWARD_DNS_RULES_STATE="{t}/state"; VWARD_UPTIME_FILE="{t}/uptime"; VWARD_NDNPROXY_CONF="{live_path}"
 VWARD_DOMAIN_LISTS_CONF="{t}/lists.conf"; VWARD_NSLOOKUP="{t}/nslookup"
-vward_running_config() {{ cat "{t}/config"; }}
+vward_running_config() {{ {replace_live} cat "{t}/config"; }}
 {FUNC}dns_rules_check
 """
         r = subprocess.run(SH + ["-c", script], text=True, capture_output=True, timeout=60)
@@ -96,7 +107,7 @@ vward_running_config() {{ cat "{t}/config"; }}
         state = (t / "state").read_text() if (t / "state").exists() else ""
         return state, (t / "ndmc.log").read_text().splitlines(), (t / "health.log").read_text() if (t / "health.log").exists() else ""
 
-    # The default (owner 08.11): observation only - the mismatch logged once a boot, nothing sent.
+    # The default (owner 08.11): observation only, nothing sent.
     (t / "ndnproxymain.conf").write_text(live(RULES[:1]))
     for conf in (None, "dns_rules_check=observe\n"):
         if conf is None:
@@ -110,9 +121,9 @@ vward_running_config() {{ cat "{t}/config"; }}
             fail(f"observation must send nothing: {ndmc[:2]} {state!r}")
         if "DNS_RULES result=mismatch_observed config=16 live=1 would_reapply=15" not in log:
             fail(f"the observed mismatch must be logged: {log!r}")
-        state, ndmc, _ = run()
-        if ndmc:
-            fail("observation: once a boot")
+        state, ndmc, unchanged_log = run()
+        if ndmc or unchanged_log != log:
+            fail("observation: no repeated log for an unchanged snapshot")
     (t / "state").unlink()
     (t / "health.log").unlink()
     (t / "lists.conf").write_text("dns_rules_check=1\n")
@@ -143,20 +154,66 @@ vward_running_config() {{ cat "{t}/config"; }}
         fail(f"16 of 16: ok and nothing done: {state!r} {ndmc}")
     if "DNS_RULES result=ok config=16 live=16 tries=1 resolves=yes" not in log:
         fail(f"ok logged: {log!r}")
-    # Done for this boot.
+    # A stable live snapshot must not redo work. The same boot can lose rules again.
+    state, ndmc, unchanged_log = run()
+    if ndmc or unchanged_log != log:
+        fail("an unchanged live snapshot must not repeat the check")
+    (t / "ndnproxymain.conf").write_text(live(RULES[:1]))
+    (t / "next-live.conf").write_text(live(RULES[1:]))
+    state, ndmc, changed_log = run(rebuild=True)
+    if ndmc or "RESULT=ok" not in state or changed_log != log:
+        fail("a live DNS rebuild during the check invalidates the write plan")
+    (t / "ndnproxymain.conf").write_text(live(RULES[:1]))
+    state, ndmc, log = run()
+    if ndmc != want or "RESULT=reapplied" not in state or "TRIES=1" not in state:
+        fail(f"same-boot recurrence after ok must recover exactly the missing rules: {state!r} {ndmc[:2]}")
+    (t / "ndnproxymain.conf").write_text(live(RULES))
+    state, ndmc, _ = run()
+    if ndmc or "RESULT=ok" not in state:
+        fail("recovery after a second loss must return to ok")
+
+    # An empty or incompatible live snapshot after success still must never authorize writes.
     (t / "ndnproxymain.conf").write_text(live([]))
     state, ndmc, _ = run()
-    if ndmc:
-        fail("once a boot")
+    if ndmc or "RESULT=unknown" not in state:
+        fail("zero live after a successful check remains non-actionable")
+
+    # Exercise the supervisor gate using real checker state and a synchronous launcher.
+    launcher = t / "launcher"
+    launcher.write_text(f'#!/bin/sh\necho "$1" >> "{t}/tick.log"\n')
+    launcher.chmod(0o755)
+    tick = TICK.replace('( $UNNICE "$DNS_RULES_BIN" dns-rules </dev/null >/dev/null 2>&1 & )',
+                        '"$DNS_RULES_BIN" dns-rules')
+
+    def scheduled() -> bool:
+        (t / "tick.log").unlink(missing_ok=True)
+        subprocess.run(SH + ["-c", tick + "dns_rules_tick"], check=True, timeout=10,
+                       env={"PATH": "/usr/bin:/bin", "VWARD_NDNPROXY_CONF": str(t / "ndnproxymain.conf"),
+                            "DNS_RULES_STATE": str(t / "state"), "DNS_RULES_BIN": str(launcher)})
+        return (t / "tick.log").exists()
+
+    (t / "ndnproxymain.conf").write_text(live(RULES))
+    run()
+    if scheduled():
+        fail("the supervisor must not start a DNS checker on an unchanged snapshot")
+    (t / "ndnproxymain.conf").write_text(live(RULES[:1]))
+    if not scheduled():
+        fail("the supervisor must start the DNS checker after a live DNS rebuild")
 
     # Never fixed: 3 tries, then given up and nothing more.
     (t / "ndnproxymain.conf").write_text(live(RULES[:1]))
     (t / "state").unlink()
     (t / "health.log").unlink()
-    for _ in range(3):
-        run()
+    run()
+    (t / "ndnproxymain.conf").write_text(live([]))
+    state, ndmc, _ = run()
+    if ndmc or "TRIES=1" not in state:
+        fail("a transient empty snapshot must not reset the write budget")
+    (t / "ndnproxymain.conf").write_text(live(RULES[:1]))
+    run()
+    run()
     state, ndmc, log = run()
-    if ndmc or "RESULT=gave_up" not in state or log.count("result=mismatch") != 3:
+    if ndmc or scheduled() or "RESULT=gave_up" not in state or log.count("result=mismatch") != 3:
         fail(f"3 tries, then gave_up: {state!r} {log!r}")
 
     # No live file: nothing done, said so.

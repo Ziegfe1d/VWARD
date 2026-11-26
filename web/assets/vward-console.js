@@ -940,8 +940,9 @@ function logEntry(raw) {
   }
   if (code === 'POLICY_SCAN_ABORT') {
     const rc = /^audit_rc=(\d+)$/.exec(parts[0] || '');
-    const text = rc ? 'Проверка IP-категорий завершилась с ошибкой (код ' + rc[1] + ')' :
-      'Проверка IP-категорий остановлена. Итог скана не подтверждён';
+    let text = 'Проверка IP-категорий остановлена. Итог скана не подтверждён';
+    if (rc) text = 'Проверка IP-категорий завершилась с ошибкой (код ' + rc[1] + ')';
+    if (/^signal=(HUP|INT|TERM)$/.test(parts[0] || '')) text = 'Проверка IP-категорий прервана';
     return { t: t, src: src, code: code, text: text, more: more, level: 'warn' };
   }
   if (code === 'SKIPPED_TUNNEL_DOWN') {

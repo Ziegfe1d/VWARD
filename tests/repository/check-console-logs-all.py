@@ -128,6 +128,8 @@ with tempfile.TemporaryDirectory() as tmp:
         "2026-11-12 00:10:09 AUDIT_PROCESS_FINISHED rc=1\n"
         "2026-11-12 00:10:09 CHAIN_ABORT audit_rc=1\n"
         "2026-11-12 00:11:08 CHAIN_ABORT audit_summary_not_confirmed\n"
+        "2026-11-12 00:12:09 CHAIN_ABORT signal=TERM\n"
+        "2026-11-12 00:13:09 CHAIN_ABORT signal=private.example\n"
         "untimestamped https://private.example/\n")
     (log / "vward-policy-audit-summary.log").write_text(
         "2026-11-11 00:10:12|SKIPPED_TUNNEL_DOWN|tunnel=OpkgTun0|health=none\n"
@@ -146,6 +148,7 @@ with tempfile.TemporaryDirectory() as tmp:
         "@@VWARD-LOG policyrun\n2026-11-12 00:10:04|POLICY_SCAN_START",
         "00:10:09|POLICY_SCAN_ABORT|audit_rc=1",
         "00:11:08|POLICY_SCAN_ABORT|reason=summary_unconfirmed",
+        "00:12:09|POLICY_SCAN_ABORT|signal=TERM",
         "|SKIPPED_TUNNEL_DOWN|",
         "|duration=1785s|targets=538|checked=538|ok=23",
     ]

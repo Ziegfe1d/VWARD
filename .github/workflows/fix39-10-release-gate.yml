@@ -1,0 +1,77 @@
+name: Single-use fix.39.10 signed dev release gate
+
+on:
+  push:
+    branches: [dev]
+    paths: [VERSION]
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  gate-and-dispatch:
+    if: >-
+      github.repository == 'Ziegfe1d/VWARD' && startsWith(github.event.head_commit.message, 'Merge PR #113: release VWARD fix.39.10')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 130
+    steps:
+      - name: Checkout exact dev HEAD
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate fixed scope and publication sequence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat VERSION)" = '0.2.0-rc.2.fix.39.10'
+          test "$(jq -r '.signed.version' updates/dev/update-manifest.json)" = '0.2.0-rc.2.fix.39.9'
+          test "$(jq -r '.signed.sequence' updates/dev/update-manifest.json)" -lt 2026112601
+          test "$(jq -r '.signed.sequence' updates/dev/v2/manifest.json)" -lt 2026112601
+          sha256sum -c SHA256SUMS
+      - name: Wait for full VWARD CI on exact pushed dev SHA
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 240); do
+            latest=$(gh api "repos/$GITHUB_REPOSITORY/branches/dev" --jq '.commit.sha')
+            if [ "$latest" != "$GITHUB_SHA" ]; then
+              echo 'ERROR: dev HEAD changed, no release dispatch'; exit 1
+            fi
+            run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&event=push&per_page=100" --jq '.workflow_runs[] | select(.name == "VWARD CI") | .id' | head -n 1)
+            if [ -n "$run" ]; then
+              status=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq '.status')
+              conclusion=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq '.conclusion')
+              if [ "$status" = completed ] && [ "$conclusion" != success ]; then
+                echo "ERROR: VWARD CI completed with $conclusion; no release"; exit 1
+              fi
+              if [ "$status" = completed ] && [ "$conclusion" = success ]; then
+                jobs=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/jobs?per_page=100")
+                for required in routing-core-go repository-consistency resource-audit updater-tests; do
+                  got=$(printf '%s' "$jobs" | jq -r --arg n "$required" '[.jobs[] | select(.name == $n) | .conclusion][0] // "missing"')
+                  if [ "$got" != success ]; then
+                    echo "ERROR: required job $required=$got"; exit 1
+                  fi
+                done
+                echo "CHECKS=PASS HEAD=$GITHUB_SHA RUN=$run"
+                exit 0
+              fi
+            fi
+            sleep 30
+          done
+          echo 'ERROR: CI not completed inside gate window'; exit 1
+      - name: Dispatch existing production-signed dev workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/branches/dev" --jq '.commit.sha')
+          test "$latest" = "$GITHUB_SHA" || { echo 'ERROR: dev moved'; exit 1; }
+          gh workflow run build-dev-release.yml --ref dev \
+            -f sequence=2026112601 \
+            -f min_vward=0.1.9-beta \
+            -f priority=ROUTINE
+          echo 'SIGNED_RELEASE=DISPATCHED; publication remains unconfirmed until its workflow succeeds'
