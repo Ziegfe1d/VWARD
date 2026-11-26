@@ -3740,6 +3740,8 @@ if [ "$ACTION" = "log" ]; then
                             print stamp "|POLICY_SCAN_START"
                         else if (event ~ /^CHAIN_ABORT audit_rc=[0-9]+$/)
                             print stamp "|POLICY_SCAN_ABORT|" $4
+                        else if (event ~ /^CHAIN_ABORT signal=(HUP|INT|TERM)$/)
+                            print stamp "|POLICY_SCAN_ABORT|" $4
                         else if (event == "CHAIN_ABORT audit_summary_not_confirmed")
                             print stamp "|POLICY_SCAN_ABORT|reason=summary_unconfirmed"
                     }' "$1" 2>/dev/null
