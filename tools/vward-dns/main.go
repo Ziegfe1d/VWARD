@@ -1,4 +1,4 @@
-// vward-dns is the loopback resolver for VWARD's per-domain DNS pilot.
+// vward-dns is the local resolver for VWARD's per-domain DNS pilot.
 package main
 
 import (
@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strconv"
@@ -33,6 +34,7 @@ var domains = []string{
 }
 
 var resolvers = []string{"8.8.8.8:53", "1.1.1.1:53"}
+var routerLoopback = netip.AddrFrom4([4]byte{127, 0, 0, 1})
 
 func selected(name string) bool {
 	name = strings.ToLower(strings.TrimSuffix(name, "."))
@@ -145,17 +147,19 @@ func tunnelDialer(device string) (dialContext, error) {
 	return dialer.DialContext, nil
 }
 
-func newProxy(port int, servers []upstream.Upstream) (*proxy.Proxy, error) {
+func newProxy(address netip.Addr, port int, servers []upstream.Upstream) (*proxy.Proxy, error) {
 	stats := &pilotStats{}
 	return proxy.New(&proxy.Config{
-		UDPListenAddr:  []*net.UDPAddr{{IP: net.IPv4(127, 0, 0, 1), Port: port}},
-		TCPListenAddr:  []*net.TCPAddr{{IP: net.IPv4(127, 0, 0, 1), Port: port}},
+		UDPListenAddr:  []*net.UDPAddr{{IP: address.AsSlice(), Port: port}},
+		TCPListenAddr:  []*net.TCPAddr{{IP: address.AsSlice(), Port: port}},
 		UpstreamConfig: &proxy.UpstreamConfig{Upstreams: servers},
 		MaxGoroutines:  16,
 		Logger:         slog.New(slog.DiscardHandler),
 		RequestHandler: func(p *proxy.Proxy, request *proxy.DNSContext) error {
 			questions := request.Req.Question
-			if request.Req.Opcode != dns.OpcodeQuery || len(questions) != 1 ||
+			peer := request.Addr.Addr().Unmap()
+			if (peer != address && peer != routerLoopback) ||
+				request.Req.Opcode != dns.OpcodeQuery || len(questions) != 1 ||
 				questions[0].Qclass != dns.ClassINET {
 				request.Res = new(dns.Msg).SetRcode(request.Req, dns.RcodeRefused)
 
@@ -185,7 +189,7 @@ func newProxy(port int, servers []upstream.Upstream) (*proxy.Proxy, error) {
 	})
 }
 
-func serve(device string, port int) error {
+func serve(device string, address netip.Addr, port int) error {
 	dial, err := tunnelDialer(device)
 	if err != nil {
 		return err
@@ -195,7 +199,7 @@ func serve(device string, port int) error {
 		servers = append(servers, &tunnelUpstream{address: resolver, dial: dial})
 	}
 
-	server, err := newProxy(port, servers)
+	server, err := newProxy(address, port, servers)
 	if err != nil {
 		return err
 	}
@@ -204,7 +208,7 @@ func serve(device string, port int) error {
 	if err = server.Start(ctx); err != nil {
 		return err
 	}
-	fmt.Printf("vward-dns listening on 127.0.0.1:%d, tunnel=%s\n", port, device)
+	fmt.Printf("vward-dns listening on %s:%d, tunnel=%s\n", address, port, device)
 	<-ctx.Done()
 
 	shutdown, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -213,12 +217,11 @@ func serve(device string, port int) error {
 	return server.Shutdown(shutdown)
 }
 
-// Probe both services through the actual loopback DNS listener or Keenetic :53.
-func probe(port int) error {
+// Probe both services through the pilot listener or Keenetic :53.
+func probe(address string) error {
 	for _, host := range []string{"www.youtube.com.", "www.instagram.com."} {
 		query := new(dns.Msg).SetQuestion(host, dns.TypeA)
 		client := &dns.Client{Timeout: probeDeadline}
-		address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 		response, _, err := client.Exchange(query, address)
 		if err != nil {
 			return fmt.Errorf("%s: %w", host, err)
@@ -246,10 +249,10 @@ func probe(port int) error {
 	return nil
 }
 
-func health(port int) error {
+func health(address string) error {
 	query := new(dns.Msg).SetQuestion(healthName, dns.TypeTXT)
 	client := &dns.Client{Timeout: time.Second}
-	response, _, err := client.Exchange(query, net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	response, _, err := client.Exchange(query, address)
 	if err != nil {
 		return err
 	}
@@ -281,10 +284,11 @@ func run(args []string) error {
 		return nil
 	}
 	if len(args) == 0 || (args[0] != "serve" && args[0] != "probe" && args[0] != "health") {
-		return errors.New("usage: vward-dns domains | serve -tunnel DEVICE [-port PORT] | probe|health [-port PORT]")
+		return errors.New("usage: vward-dns domains | serve -tunnel DEVICE | probe | health [-address IPv4] [-port PORT]")
 	}
 	cmd := flag.NewFlagSet(args[0], flag.ContinueOnError)
-	port := cmd.Int("port", defaultPort, "loopback DNS port")
+	port := cmd.Int("port", defaultPort, "DNS port")
+	host := cmd.String("address", routerLoopback.String(), "local DNS IPv4 address")
 	device := cmd.String("tunnel", "", "Linux tunnel interface")
 	if err := cmd.Parse(args[1:]); err != nil {
 		return err
@@ -292,17 +296,22 @@ func run(args []string) error {
 	if cmd.NArg() != 0 || *port < 1 || *port > 65535 {
 		return errors.New("invalid port or extra arguments")
 	}
+	address, err := netip.ParseAddr(*host)
+	if err != nil || !address.Is4() || (!address.IsGlobalUnicast() && address != routerLoopback) {
+		return errors.New("a specific IPv4 DNS address is required")
+	}
+	endpoint := net.JoinHostPort(address.String(), strconv.Itoa(*port))
 	if args[0] == "probe" {
-		return probe(*port)
+		return probe(endpoint)
 	}
 	if args[0] == "health" {
-		return health(*port)
+		return health(endpoint)
 	}
 	if *device == "" || *port < 1024 || *port == 65053 {
-		return errors.New("a tunnel and an unreserved loopback port are required")
+		return errors.New("a tunnel and an unreserved DNS port are required")
 	}
 
-	return serve(*device, *port)
+	return serve(*device, address, *port)
 }
 
 func main() {

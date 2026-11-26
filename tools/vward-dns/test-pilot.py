@@ -19,7 +19,11 @@ with tempfile.TemporaryDirectory() as temp:
     fake = Path(temp)
     (fake / "tmp").mkdir()
     profile = fake / "profile.sh"
-    profile.write_text("vward_profile_load() { VWARD_TUNNEL_INTERFACE=OpkgTun0; VWARD_TUNNEL_DEVICE=opkgtun0; }\n")
+    profile.write_text(
+        'vward_profile_load() { VWARD_TUNNEL_INTERFACE=OpkgTun0; VWARD_TUNNEL_DEVICE=opkgtun0; '
+        'VWARD_LAN_ADDRESS=${PILOT_LAN_ADDRESS:-192.168.1.1}; }\n'
+        'vward_valid_ipv4() { case "$1" in 192.168.1.1|192.168.2.1|127.0.0.1) return 0 ;; esac; return 1; }\n'
+    )
     state, live = fake / "state", fake / "live"
     ndmc = fake / "ndmc"
     ndmc.write_text(r"""#!/usr/bin/env python3
@@ -35,7 +39,10 @@ if cmd == 'show running-config':
     sys.exit()
 with (d / 'mutations').open('a') as stream:
     print(cmd, file=stream)
-if os.environ.get('PILOT_REJECT_ATTACHMENT') == '1' and cmd.startswith('ip name-server 127.0.0.1:65153 '):
+if cmd.startswith('ip name-server 127.0.0.1:65153 '):
+    print('Dns::Manager error[22544486]: invalid IP address: 127.0.0.1.')
+    sys.exit(122)
+if os.environ.get('PILOT_REJECT_ATTACHMENT') == '1' and cmd.startswith('ip name-server 192.168.1.1:65153 '):
     print('Command::Base error: attachment refused by fixture')
     sys.exit(0)
 if cmd.startswith('no ip name-server '):
@@ -44,7 +51,7 @@ else:
     assert cmd.startswith('ip name-server '), cmd
     rules.add(cmd)
 state.write_text('\n'.join(sorted(rules)) + '\n')
-local = [r for r in rules if r.startswith('ip name-server 127.0.0.1:65153 ')]
+local = [r for r in rules if ':65153 ' in r]
 target = 'ip name-server 1.1.1.1 cdninstagram.com on OpkgTun0'
 lost = d / 'lost-live-rule'
 if cmd == target:
@@ -63,8 +70,9 @@ case "$1:$3" in
     domains:) printf '%s\n' {' '.join(DOMAINS)} ;;
     probe:53) [ "${{PILOT_BAD_PROBE:-0}}" != 1 ] || exit 1
               [ "${{PILOT_CACHE_ONLY:-0}}" = 1 ] || echo yes > "$PILOT_FIXTURE/forwarded" ;;
-    probe:65153) exit 0 ;;
-    health:65153) if [ -s "$PILOT_FIXTURE/forwarded" ]; then echo '2 2'; else echo '1 1'; fi ;;
+    probe:65153) [ -z "$4" ] || [ "$4:$5" = '-address:192.168.1.1' ] ;;
+    health:65153) [ -z "$4" ] || [ "$4:$5" = '-address:192.168.1.1' ] || exit 1
+                 if [ -s "$PILOT_FIXTURE/forwarded" ]; then echo '2 2'; else echo '1 1'; fi ;;
     *) exit 1 ;;
 esac
 """)
@@ -122,7 +130,7 @@ esac
     (fake / "forwarded").unlink(missing_ok=True)
     result = call("trial", PILOT_REJECT_ATTACHMENT="1")
     assert result.returncode and "attach_failed" in result.stderr, result
-    assert "ndmc_failed rc=0 command=ip name-server 127.0.0.1:65153 " in result.stderr, result
+    assert "ndmc_failed rc=0 command=ip name-server 192.168.1.1:65153 " in result.stderr, result
     assert "attachment refused by fixture" in result.stderr, result
     assert_restored()
 
@@ -155,6 +163,13 @@ esac
     pending.write_text("\n".join(OLD) + "\n")
     set_rules([*OLD[1:], "ip name-server 127.0.0.1:65153 cdninstagram.com"])
     result = call("restore")
+    assert result.returncode == 0, result
+    assert_restored()
+
+    # The address recorded before a trial remains the scope of a detached recovery.
+    pending.write_text("pilot_address=192.168.1.1\n" + "\n".join(OLD) + "\n")
+    set_rules([*OLD[1:], "ip name-server 192.168.1.1:65153 cdninstagram.com"])
+    result = call("restore", PILOT_LAN_ADDRESS="192.168.2.1")
     assert result.returncode == 0, result
     assert_restored()
 

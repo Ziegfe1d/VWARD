@@ -91,7 +91,7 @@ compare_rules() {
 # Recovery tolerates a partially executed switch or a lost response to a Keenetic command.
 restore() {
     [ -f "$STATE/pending" ] && [ ! -L "$STATE/pending" ] || return 1
-    cmp -s "$STATE/pending" "$WORK/before" || return 1
+    cmp -s "$STATE/pending" "$WORK/recovery" || return 1
     snapshot "$WORK/current" || return 1
     compare_rules -23 "$WORK/current" "$WORK/allowed" > "$WORK/diff" && [ ! -s "$WORK/diff" ] || return 1
     compare_rules -23 "$WORK/before" "$WORK/current" > "$WORK/diff" || return 1
@@ -135,7 +135,7 @@ read_live_rules() {
         [ ! -r "$live" ] || { live_file=$live; break; }
     done
     [ -n "$live_file" ] || return 1
-    awk -v domains="$DOMAINS" -v upstream="127.0.0.1:$PORT" -v iface="$TUNNEL" '
+    awk -v domains="$DOMAINS" -v upstream="$PILOT_ADDRESS:$PORT" -v iface="$TUNNEL" '
         BEGIN {n = split(domains, names, "\n"); for (i = 1; i <= n; i++) selected[names[i]] = 1}
         $1 == "dns_server" && $2 == "=" {
             name = tolower($4); sub(/\.$/, "", name)
@@ -177,15 +177,31 @@ repair_legacy_live() {
 [ "$#" = 1 ] || fail usage
 case "$1" in serve|probe|plan|trial|restore) ;; *) fail usage ;; esac
 [ -x "$BIN" ] || fail binary_missing
-[ "$1" != probe ] || exec "$BIN" probe -port "$PORT"
 [ -r "$PROFILE" ] || fail profile_missing
 . "$PROFILE"
 vward_profile_load || fail profile_unavailable
+PILOT_ADDRESS=${VWARD_LAN_ADDRESS:-}
+LEGACY_RECORD=0
+if [ "$1" = restore ]; then
+    [ -f "$STATE/pending" ] && [ ! -L "$STATE/pending" ] || fail missing_recovery_record
+    IFS= read -r pending_first < "$STATE/pending" || fail invalid_recovery_record
+    case "$pending_first" in
+        pilot_address=*) PILOT_ADDRESS=${pending_first#pilot_address=} ;;
+        'ip name-server '*) PILOT_ADDRESS=127.0.0.1; LEGACY_RECORD=1 ;;
+        *) fail invalid_recovery_record ;;
+    esac
+fi
+vward_valid_ipv4 "$PILOT_ADDRESS" || fail invalid_pilot_address
+case "$PILOT_ADDRESS" in
+    0.*) fail invalid_pilot_address ;;
+    127.*) [ "$LEGACY_RECORD" = 1 ] || fail invalid_pilot_address ;;
+esac
+[ "$1" != probe ] || exec "$BIN" probe -port "$PORT" -address "$PILOT_ADDRESS"
 TUNNEL=${VWARD_TUNNEL_INTERFACE:-}
 DEVICE=${VWARD_TUNNEL_DEVICE:-}
 case "$TUNNEL" in OpkgTun[0-9]) ;; *) fail not_an_opkg_tunnel ;; esac
 [ "$DEVICE" = "$(printf '%s' "$TUNNEL" | tr 'A-Z' 'a-z')" ] || fail tunnel_device_unverified
-[ "$1" != serve ] || exec "$BIN" serve -tunnel "$DEVICE" -port "$PORT"
+[ "$1" != serve ] || exec "$BIN" serve -tunnel "$DEVICE" -port "$PORT" -address "$PILOT_ADDRESS"
 
 DOMAINS=$("$BIN" domains) || fail invalid_pilot_domains
 [ "$(printf '%s\n' "$DOMAINS" | grep -Ec '^[a-z0-9-]+(\.[a-z0-9-]+)+$')" = 8 ] &&
@@ -199,13 +215,19 @@ for domain in $DOMAINS; do
     done
 done | LC_ALL=C sort > "$WORK/before"
 for domain in $DOMAINS; do
-    printf 'ip name-server 127.0.0.1:%s %s\n' "$PORT" "$domain"
+    printf 'ip name-server %s:%s %s\n' "$PILOT_ADDRESS" "$PORT" "$domain"
 done | LC_ALL=C sort > "$WORK/pilot"
 LC_ALL=C sort "$WORK/before" "$WORK/pilot" > "$WORK/allowed"
+{
+    if [ "$LEGACY_RECORD" = 0 ]; then
+        printf 'pilot_address=%s\n' "$PILOT_ADDRESS"
+    fi
+    cat "$WORK/before"
+} > "$WORK/recovery" || fail cannot_prepare_restore
 if [ "$1" = plan ]; then
     snapshot "$WORK/current" && cmp -s "$WORK/current" "$WORK/before" || fail dns_scope_differs_from_expected
     read_live_rules && cmp -s "$WORK/live" "$WORK/before" || fail legacy_live_rules_unverified
-    echo "result=plan_ready tunnel=$TUNNEL port=$PORT domains=8 current_rules=16 active_rules=16"
+    echo "result=plan_ready tunnel=$TUNNEL pilot_address=$PILOT_ADDRESS port=$PORT domains=8 current_rules=16 active_rules=16"
     exit 0
 fi
 
@@ -227,11 +249,11 @@ fi
 [ ! -e "$STATE/pending" ] && [ ! -L "$STATE/pending" ] || fail prior_trial_requires_restore
 snapshot "$WORK/current" && cmp -s "$WORK/current" "$WORK/before" || fail dns_scope_differs_from_expected
 read_live_rules && cmp -s "$WORK/live" "$WORK/before" || fail legacy_live_rules_unverified
-"$BIN" probe -port "$PORT" || fail local_resolver_failed
-"$BIN" health -port "$PORT" >/dev/null || fail local_health_unverified
+"$BIN" probe -port "$PORT" -address "$PILOT_ADDRESS" || fail local_resolver_failed
+"$BIN" health -port "$PORT" -address "$PILOT_ADDRESS" >/dev/null || fail local_health_unverified
 mkdir -p "$STATE" && [ -d "$STATE" ] && [ ! -L "$STATE" ] && [ -O "$STATE" ] || fail unsafe_state_directory
 pending=$(mktemp "$STATE/pending.XXXXXX") || fail cannot_record_restore
-if ! cat "$WORK/before" > "$pending" || ! mv "$pending" "$STATE/pending"; then
+if ! cat "$WORK/recovery" > "$pending" || ! mv "$pending" "$STATE/pending"; then
     rm -f "$pending"
     fail cannot_record_restore
 fi
@@ -240,9 +262,9 @@ while IFS= read -r rule; do ndm "$rule" || fail attach_failed; done < "$WORK/pil
 while IFS= read -r rule; do ndm "no $rule" || fail attach_failed; done < "$WORK/before"
 snapshot "$WORK/current" && cmp -s "$WORK/current" "$WORK/pilot" || fail attachment_unverified
 wait_live_rules "$WORK/pilot" || fail live_dns_attachment_unverified
-counts=$("$BIN" health -port "$PORT") || fail local_health_unverified
+counts=$("$BIN" health -port "$PORT" -address "$PILOT_ADDRESS") || fail local_health_unverified
 "$BIN" probe -port 53 || fail keenetic_probe_failed
-counts_after=$("$BIN" health -port "$PORT") || fail local_health_unverified
+counts_after=$("$BIN" health -port "$PORT" -address "$PILOT_ADDRESS") || fail local_health_unverified
 printf '%s\n%s\n' "$counts" "$counts_after" |
     awk 'NR == 1 {a=$1; b=$2} NR == 2 {ok=($1+0>a+0 && $2+0>b+0)} END {exit !ok}' ||
     fail queries_not_seen_by_vward_dns

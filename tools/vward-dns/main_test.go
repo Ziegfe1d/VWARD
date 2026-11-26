@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/netip"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +27,11 @@ func TestPilotScope(t *testing.T) {
 	}
 	if _, err := tunnelDialer("lo"); err == nil {
 		t.Fatal("loopback unexpectedly accepted as a VPN")
+	}
+	for _, address := range []string{"0.0.0.0", "::", "224.0.0.1", "invalid"} {
+		if err := run([]string{"probe", "-address", address}); err == nil || err.Error() != "a specific IPv4 DNS address is required" {
+			t.Fatalf("invalid DNS address %q was accepted: %v", address, err)
+		}
 	}
 }
 
@@ -99,7 +105,10 @@ func TestPilotListener(t *testing.T) {
 	healthy := &testUpstream{}
 	failed := &testUpstream{}
 	failed.failed.Store(true)
-	p, err := newProxy(0, []upstream.Upstream{failed, healthy})
+	// Use a second loopback address to exercise an explicit bind without
+	// depending on the build machine's LAN configuration.
+	address := netip.MustParseAddr("127.0.0.2")
+	p, err := newProxy(address, 0, []upstream.Upstream{failed, healthy})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,8 +120,8 @@ func TestPilotListener(t *testing.T) {
 
 	tcp := p.Addr(proxy.ProtoTCP).(*net.TCPAddr)
 	udp := p.Addr(proxy.ProtoUDP).(*net.UDPAddr)
-	if !tcp.IP.IsLoopback() || !udp.IP.IsLoopback() {
-		t.Fatal("pilot listener is exposed outside loopback")
+	if !tcp.IP.Equal(address.AsSlice()) || !udp.IP.Equal(address.AsSlice()) {
+		t.Fatalf("pilot must listen only on %s: got %s and %s", address, tcp.IP, udp.IP)
 	}
 
 	query := func(client *dns.Client, address, name string, kind uint16) *dns.Msg {
@@ -125,6 +134,15 @@ func TestPilotListener(t *testing.T) {
 		return res
 	}
 	client := &dns.Client{Timeout: 2 * time.Second}
+	otherIP := net.IPv4(127, 0, 0, 3)
+	otherUDP := &dns.Client{Timeout: 2 * time.Second, Dialer: &net.Dialer{LocalAddr: &net.UDPAddr{IP: otherIP}}}
+	otherTCP := &dns.Client{Net: "tcp", Timeout: 2 * time.Second, Dialer: &net.Dialer{LocalAddr: &net.TCPAddr{IP: otherIP}}}
+	if res := query(otherUDP, udp.String(), "www.youtube.com.", dns.TypeA); res.Rcode != dns.RcodeRefused {
+		t.Fatalf("UDP DNS from a client other than the router was allowed: %v", res)
+	}
+	if res := query(otherTCP, tcp.String(), healthName, dns.TypeTXT); res.Rcode != dns.RcodeRefused {
+		t.Fatalf("TCP health check from a client other than the router was allowed: %v", res)
+	}
 	if res := query(client, udp.String(), "example.org.", dns.TypeA); res.Rcode != dns.RcodeRefused {
 		t.Fatalf("unrelated DNS query was allowed: %v", res)
 	}
