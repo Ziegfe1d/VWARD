@@ -64,8 +64,27 @@ snapshot() {
 }
 
 ndm() {
-    ndmc_timed "$1" > "$WORK/ndm.reply" 2>&1 || return 1
-    ! grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command|not found|no such entry)' "$WORK/ndm.reply"
+    nd_status=0
+    ndmc_timed "$1" > "$WORK/ndm.reply" 2>&1 || nd_status=$?
+    if [ "$nd_status" -eq 0 ] &&
+       ! grep -Eqi '(^|[^a-z])(error|failed|invalid|unknown command|not found|no such entry)' "$WORK/ndm.reply"; then
+        return 0
+    fi
+    printf 'ndmc_failed rc=%s command=%s\n' "$nd_status" "$1" >&2
+    awk 'NR > 3 {exit} {print "ndmc_reply: " substr($0, 1, 220)}' "$WORK/ndm.reply" >&2
+    return 1
+}
+
+# The Viva BusyBox has awk but no comm. Count duplicates so the same scope
+# checks work even when the running configuration contains repeated entries.
+compare_rules() {
+    case "$1" in -23|-12) ;; *) return 2 ;; esac
+    [ -r "$2" ] && [ -r "$3" ] || return 1
+    awk -v mode="$1" '
+        FILENAME == ARGV[1] { count[$0]++; next }
+        count[$0] > 0 { count[$0]--; if (mode == "-12") print; next }
+        mode == "-23" { print }
+    ' "$3" "$2"
 }
 
 # Every remembered rule is validated against the data generated from the fixed pilot scope.
@@ -74,14 +93,14 @@ restore() {
     [ -f "$STATE/pending" ] && [ ! -L "$STATE/pending" ] || return 1
     cmp -s "$STATE/pending" "$WORK/before" || return 1
     snapshot "$WORK/current" || return 1
-    comm -23 "$WORK/current" "$WORK/allowed" > "$WORK/diff" && [ ! -s "$WORK/diff" ] || return 1
-    comm -23 "$WORK/before" "$WORK/current" > "$WORK/diff" || return 1
+    compare_rules -23 "$WORK/current" "$WORK/allowed" > "$WORK/diff" && [ ! -s "$WORK/diff" ] || return 1
+    compare_rules -23 "$WORK/before" "$WORK/current" > "$WORK/diff" || return 1
     while IFS= read -r rule; do ndm "$rule" || :; done < "$WORK/diff"
     # Read the new state before taking out the local server so there is always a
     # configured path back. Running-config proof is distinct from DNS success.
     snapshot "$WORK/current" || return 1
-    comm -23 "$WORK/before" "$WORK/current" > "$WORK/diff" && [ ! -s "$WORK/diff" ] || return 1
-    comm -12 "$WORK/pilot" "$WORK/current" > "$WORK/diff" || return 1
+    compare_rules -23 "$WORK/before" "$WORK/current" > "$WORK/diff" && [ ! -s "$WORK/diff" ] || return 1
+    compare_rules -12 "$WORK/pilot" "$WORK/current" > "$WORK/diff" || return 1
     while IFS= read -r rule; do
         ndm "no $rule" || :
     done < "$WORK/diff"
@@ -143,11 +162,11 @@ wait_live_rules() {
 
 repair_legacy_live() {
     read_live_rules && [ -s "$WORK/live" ] || return 1
-    comm -23 "$WORK/live" "$WORK/before" > "$WORK/diff" && [ ! -s "$WORK/diff" ] || return 1
+    compare_rules -23 "$WORK/live" "$WORK/before" > "$WORK/diff" && [ ! -s "$WORK/diff" ] || return 1
     cp "$WORK/live" "$WORK/live-before-repair" || return 1
     snapshot "$WORK/current" && cmp -s "$WORK/current" "$WORK/before" || return 1
     read_live_rules && cmp -s "$WORK/live" "$WORK/live-before-repair" || return 1
-    comm -23 "$WORK/before" "$WORK/live" > "$WORK/diff" && [ -s "$WORK/diff" ] || return 1
+    compare_rules -23 "$WORK/before" "$WORK/live" > "$WORK/diff" && [ -s "$WORK/diff" ] || return 1
     while IFS= read -r rule; do
         ndm "no $rule" || :
         ndm "$rule" || :

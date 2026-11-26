@@ -35,6 +35,9 @@ if cmd == 'show running-config':
     sys.exit()
 with (d / 'mutations').open('a') as stream:
     print(cmd, file=stream)
+if os.environ.get('PILOT_REJECT_ATTACHMENT') == '1' and cmd.startswith('ip name-server 127.0.0.1:65153 '):
+    print('Command::Base error: attachment refused by fixture')
+    sys.exit(0)
 if cmd.startswith('no ip name-server '):
     rules.discard(cmd[3:])
 else:
@@ -75,7 +78,9 @@ esac
     pending = fake / "opt/var/lib/vward/dns-pilot/pending"
 
     def call(action, **settings):
-        return subprocess.run(SHELL + [str(HERE / "pilot.sh"), action], env=env | settings,
+        # Keenetic's shell has awk but no comm applet.
+        invoke = 'comm() { echo "comm: not found" >&2; return 127; }; . "$0"'
+        return subprocess.run(SHELL + ["-c", invoke, str(HERE / "pilot.sh"), action], env=env | settings,
                               text=True, capture_output=True, timeout=60)
 
     def set_rules(rules):
@@ -112,6 +117,13 @@ esac
     result = call("trial")
     assert (result.returncode == 0 and "result=trial_verified" in result.stdout
             and "result=original_dns_configuration_restored" in result.stdout), result
+    assert_restored()
+
+    (fake / "forwarded").unlink(missing_ok=True)
+    result = call("trial", PILOT_REJECT_ATTACHMENT="1")
+    assert result.returncode and "attach_failed" in result.stderr, result
+    assert "ndmc_failed rc=0 command=ip name-server 127.0.0.1:65153 " in result.stderr, result
+    assert "attachment refused by fixture" in result.stderr, result
     assert_restored()
 
     (fake / "forwarded").unlink(missing_ok=True)
