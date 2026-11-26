@@ -1,7 +1,7 @@
 e9250f2d1e75f23c6995b182f4c281b0940da3e2ed5b2a29970e3007df6e79a7  .github/ISSUE_TEMPLATE/bug_report.md
 2d01553cc031a8683e2d6222ba1bbcddd7b725b3264dab2044ef3841d6111887  .github/workflows/awg-engine.yml
 117eeb6261c409a756e17b77dbe77644835154a85f0f27dc1e8336ea5805d596  .github/workflows/build-dev-release.yml
-3db8e20b0e7edd0bab8ad562708c26af08ac8261256e495130d0e9bad2b29b31  .github/workflows/fix39-10-release-gate.yml
+b90da2db2f37c0ae108c0f98d2f9e8da825278cb4b04722c34585141b6cb614b  .github/workflows/fix39-10-release-gate.yml
 7b2a681802d208b4040f6ebc9bdd84d2592d895926d0678dc8f3706c205db71a  .github/workflows/fix39-9-release-gate.yml
 f8c0c8bb5b24888f747b1c3cff00f1861a490e2a5f3fd53b125a44542054d062  .github/workflows/sentinel.yml
 8f40f83c258aafa2e6338682173e7c5648026e7efb12b14fbfb5116fe83f529c  .github/workflows/services-catalog.yml
