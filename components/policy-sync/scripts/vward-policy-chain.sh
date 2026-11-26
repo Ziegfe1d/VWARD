@@ -13,7 +13,6 @@ while vward_defer policy-chain; do sleep 60; done
 vward_admission_enter policy-chain || exit $?
 cleanup() { vward_admission_leave 2>/dev/null || true; }
 trap cleanup EXIT
-trap 'exit 1' HUP INT TERM
 
 AUDIT="/opt/bin/vward-policy-audit.sh"
 SUBNET="/opt/bin/vward-policy-sync.sh"
@@ -30,11 +29,22 @@ log() {
         "$*" >> "$LOG"
 }
 
+AUDIT_ACTIVE=0
+interrupt() {
+    trap '' HUP INT TERM
+    [ "$AUDIT_ACTIVE" -eq 0 ] || log "CHAIN_ABORT signal=$1"
+    exit 1
+}
+trap 'interrupt HUP' HUP
+trap 'interrupt INT' INT
+trap 'interrupt TERM' TERM
+
 # The journal's size: housekeeping moves it whole into the archive (nothing is cut here).
 
 BEFORE_SUMMARY="$(tail -n 1 "$SUMMARY" 2>/dev/null)"
 
 log "===== AUDIT_CHAIN_START ====="
+AUDIT_ACTIVE=1
 log "SUMMARY_BEFORE=$BEFORE_SUMMARY"
 
 # =========================================================
@@ -50,9 +60,11 @@ log "AUDIT_PROCESS_FINISHED rc=$AUDIT_RC"
 # is back); the categories themselves are still updated.
 AUDIT_SKIPPED=0
 if [ "$AUDIT_RC" -eq 75 ]; then
+    AUDIT_ACTIVE=0
     log "AUDIT_SKIPPED tunnel_down"
     AUDIT_SKIPPED=1
 elif [ "$AUDIT_RC" -ne 0 ]; then
+    AUDIT_ACTIVE=0
     log "CHAIN_ABORT audit_rc=$AUDIT_RC"
     exit "$AUDIT_RC"
 fi
@@ -98,6 +110,7 @@ while [ "$WAITED" -le "$MAX_WAIT" ]; do
     WAITED=$((WAITED + WAIT_STEP))
 done
 
+AUDIT_ACTIVE=0
 if [ "$COMPLETE" -ne 1 ]; then
     log "CHAIN_ABORT audit_summary_not_confirmed"
     log "SUMMARY_AFTER=$AFTER_SUMMARY"

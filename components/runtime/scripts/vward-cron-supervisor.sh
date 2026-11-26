@@ -430,16 +430,31 @@ core_check()
     ( $UNNICE "$INITD/S91vward-route-engine" core-check </dev/null >/dev/null 2>&1 & )
 }
 
-# dns_rules_tick (16.11.2026): the DNS rules of the tunnel after a boot (vward-tunnel-health.sh dns-rules), once a minute
-# until the check is done for this boot (its state in RAM says so: then nothing is started).
+# Check tunnel DNS rules on the existing minute tick. A finished check is reused
+# while the live DNS file is unchanged; an unchanged file needs no Keenetic API call.
 DNS_RULES_BIN=${VWARD_DNS_RULES_BIN:-/opt/bin/vward-tunnel-health.sh}
 DNS_RULES_STATE=${VWARD_DNS_RULES_STATE:-/tmp/vward-dns-rules}
 dns_rules_tick()
 {
     [ -x "$DNS_RULES_BIN" ] || return 0
-    DRT_R=
-    [ ! -r "$DNS_RULES_STATE" ] || DRT_R=$(sed -n 's/^RESULT=//p' "$DNS_RULES_STATE" 2>/dev/null)
-    case "$DRT_R" in ok|gave_up|no_live_file|unknown|off|observed) return 0 ;; esac
+    DRT_R= DRT_SIG=
+    [ ! -r "$DNS_RULES_STATE" ] || while IFS='=' read -r DRT_KEY DRT_VAL; do
+        case "$DRT_KEY" in RESULT) DRT_R=$DRT_VAL ;; SIGNATURE) DRT_SIG=$DRT_VAL ;; esac
+    done < "$DNS_RULES_STATE"
+    case "$DRT_R" in
+        gave_up|off) return 0 ;;
+        ok|no_live_file|unknown|observed)
+            DRT_CURRENT=
+            for DRT_FILE in ${VWARD_NDNPROXY_CONF:-/var/ndnproxymain.conf /tmp/ndnproxymain.conf}; do
+                [ -r "$DRT_FILE" ] || continue
+                DRT_CURRENT=$(md5sum < "$DRT_FILE" 2>/dev/null) || return 0
+                break
+            done
+            if [ -n "$DRT_SIG" ] || [ "$DRT_R" = no_live_file ]; then
+                [ "${DRT_CURRENT%% *}" != "$DRT_SIG" ] || return 0
+            fi
+            ;;
+    esac
     ( $UNNICE "$DNS_RULES_BIN" dns-rules </dev/null >/dev/null 2>&1 & )
 }
 
