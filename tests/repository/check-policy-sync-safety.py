@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -197,5 +198,56 @@ reconcile_routes "{t}/running" "{t}/cats"
     r = run_shell(script, [])
     if r.returncode != 0 or (t / "ndm.log").exists() or "ADDED=0" not in r.stdout or "CONFIG_SAVE=NOT_NEEDED" not in r.stdout:
         fail(f"a /32 route Keenetic shows without its mask is added and saved again: {r.stdout} {r.stderr}")
+
+with tempfile.TemporaryDirectory() as td:
+    t = Path(td)
+    chain = (AUDIT.parent / "vward-policy-chain.sh").read_text(encoding="utf-8")
+    chain = chain.replace('/opt/bin/vward-policy-audit.sh', str(t / 'audit'))
+    chain = chain.replace('/opt/bin/vward-policy-sync.sh', str(t / 'subnet'))
+    chain = chain.replace('/opt/var/log/vward-policy-audit-summary.log', str(t / 'summary'))
+    chain = chain.replace('/opt/var/log/vward-policy-audit-chain.log', str(t / 'chain.log'))
+    (t / 'chain').write_text(chain)
+    (t / 'admission').write_text(
+        'vward_component_gate() { :; }\nvward_admission_enter() { :; }\n'
+        f'vward_admission_leave() {{ echo left >> "{t}/admission.log"; }}\n'
+    )
+    (t / 'audit').write_text(
+        '#!/bin/sh\n'
+        'case "$AUDIT_TEST_ACTION" in\n'
+        '    signal) kill -"$AUDIT_TEST_SIGNAL" "$PPID"; exit 1 ;;\n'
+        '    error) exit 2 ;;\n'
+        'esac\n'
+        f'echo "2026-11-26 00:11:00|duration=60s|targets=1|checked=1" >> "{t}/summary"\n'
+    )
+    (t / 'subnet').write_text(
+        '#!/bin/sh\n'
+        f'echo started >> "{t}/subnet.log"\n'
+        '[ "$AUDIT_TEST_ACTION" != after_scan ] || kill -TERM "$PPID"\n'
+    )
+    for name in ('audit', 'subnet'):
+        (t / name).chmod(0o755)
+
+    def run_chain(action: str, signal: str = ''):
+        for name in ('chain.log', 'summary', 'admission.log', 'subnet.log'):
+            (t / name).unlink(missing_ok=True)
+        busybox = shutil.which('busybox')
+        shell = [busybox, 'sh'] if busybox else ['/bin/sh']
+        env = os.environ | {'VWARD_ADMISSION_LIB': str(t / 'admission'),
+                            'AUDIT_TEST_ACTION': action, 'AUDIT_TEST_SIGNAL': signal}
+        result = subprocess.run(shell + [str(t / 'chain')], env=env, capture_output=True, text=True, timeout=10)
+        if (t / 'admission.log').read_text() != 'left\n':
+            fail('policy chain did not release update admission')
+        return result.returncode, (t / 'chain.log').read_text(), (t / 'subnet.log').exists()
+
+    for signal in ('TERM', 'INT', 'HUP'):
+        rc, log, subnet = run_chain('signal', signal)
+        if rc != 1 or subnet or log.count(f'CHAIN_ABORT signal={signal}\n') != 1:
+            fail(f'policy scan lost its terminal event for {signal}: {log!r}')
+    rc, log, subnet = run_chain('error')
+    if rc != 2 or subnet or log.count('CHAIN_ABORT audit_rc=2\n') != 1:
+        fail('policy chain changed the normal audit error path')
+    rc, log, subnet = run_chain('after_scan')
+    if rc != 1 or not subnet or 'AUDIT_CONFIRMED' not in log or 'CHAIN_ABORT signal=' in log:
+        fail('an interruption after the confirmed scan must not mark the audit as aborted')
 
 print("POLICY_SYNC_SAFETY=PASS")

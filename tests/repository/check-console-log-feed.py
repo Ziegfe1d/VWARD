@@ -57,6 +57,7 @@ diagnostics = [
     ("DNS_RULES|result=gave_up|config=16|live=15|tries=3", "Активно 15 из 16 правил DNS через VPN. Попытки восстановления исчерпаны", "warn"),
     ("POLICY_SCAN_START", "Проверка IP-категорий запущена", "info"),
     ("POLICY_SCAN_ABORT|audit_rc=1", "Проверка IP-категорий завершилась с ошибкой (код 1)", "warn"),
+    ("POLICY_SCAN_ABORT|signal=TERM", "Проверка IP-категорий прервана", "warn"),
     ("POLICY_SCAN_ABORT|reason=summary_unconfirmed", "Проверка IP-категорий остановлена. Итог скана не подтверждён", "warn"),
     ("SKIPPED_TUNNEL_DOWN|health=none", "Проверка IP-категорий пропущена. Доступность VPN не подтверждена", "warn"),
     ("duration=1785s|targets=538|checked=538|ok=23", "Проверка IP-категорий завершена. Проверено 538 из 538", "ok"),

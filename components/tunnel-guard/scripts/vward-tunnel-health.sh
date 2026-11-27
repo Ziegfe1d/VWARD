@@ -14,10 +14,12 @@ vward_profile_load || exit 1
 
 # DNS rules of the tunnel after a boot (fix.34.1, r6). 25.10 after a reboot Keenetic's DNS proxy
 # took 1 of the 16 «ip name-server <server> <domain> on <tunnel>» lines of the configuration (the
-# live ndnproxymain.conf), Instagram did not resolve; «no» and the same line again fixed it. Once
-# a boot, the tunnel UP for DNS_RULES_UP_MIN minutes and the router up for 5: every such line of
+# live ndnproxymain.conf), Instagram did not resolve; «no» and the same line again fixed it.
+# With the tunnel up and the router up for 5 minutes, every such line of
 # the running configuration must be in the live file (its server and domain on one line); the
 # missing ones are given again, up to 3 tries a minute apart (none found: «unknown», nothing done). State in RAM (/tmp/vward-dns-rules).
+# A completed check is valid for the checked version of the live file. Keenetic can lose
+# bindings again when it rebuilds the file without rebooting.
 # dns_rules_check in domain-lists.conf: 1 - the missing lines are given again (as before);
 # 0 - no check at all; anything else, or no line - observation only (owner 08.11: the 16 rules are
 # his, VWARD does not write them by default): the mismatch is compared and logged, nothing is sent.
@@ -25,11 +27,11 @@ dns_rules_check()
 {
     DR=${VWARD_DNS_RULES_STATE:-/tmp/vward-dns-rules}
     DR_LOG=${VWARD_DNS_RULES_LOG:-$LOG}
-    DR_RESULT='' DR_TRIES=0
+    DR_RESULT='' DR_TRIES=0 DR_PREV_SIG=''
     [ ! -r "$DR" ] || while IFS='=' read -r K V; do
-        case "$K" in RESULT) DR_RESULT=$V ;; TRIES) DR_TRIES=$V ;; esac
+        case "$K" in RESULT) DR_RESULT=$V ;; TRIES) DR_TRIES=$V ;; SIGNATURE) DR_PREV_SIG=$V ;; esac
     done < "$DR"
-    case "$DR_RESULT" in ok|gave_up|no_live_file|unknown|off|observed) return 0 ;; esac
+    case "$DR_RESULT" in gave_up|off) return 0 ;; esac
     case "$DR_TRIES" in ''|*[!0-9]*) DR_TRIES=0 ;; esac
     DR_CONF=${VWARD_DOMAIN_LISTS_CONF:-/opt/etc/vward/route-engine/domain-lists.conf}
     DR_MODE=$(awk -F= '$1 == "dns_rules_check" {print $2; exit}' "$DR_CONF" 2>/dev/null)
@@ -50,10 +52,15 @@ dns_rules_check()
     done
     if [ -z "$DR_LIVE" ]; then
         # Nothing to compare with: nothing is done (a check that cannot see says so, not «ok»).
-        printf 'RESULT=no_live_file\nAT=%s\n' "$NOW_EPOCH" > "$DR"
+        [ "$DR_RESULT" != no_live_file ] || return 0
+        printf 'RESULT=no_live_file\nTRIES=%s\nAT=%s\n' "$DR_TRIES" "$NOW_EPOCH" > "$DR"
         echo "$NOW_TEXT|DNS_RULES result=no_live_file" >> "$DR_LOG"
         return 0
     fi
+    DR_SIG=$(md5sum < "$DR_LIVE" 2>/dev/null) || return 0
+    DR_SIG=${DR_SIG%% *}
+    [ "$DR_SIG" != "$DR_PREV_SIG" ] || return 0
+    [ "$DR_RESULT" != ok ] || DR_TRIES=0
     # Only «ip name-server»: its RCI subtree when proven (owner 08.11), else the whole config.
     if command -v vward_keenetic_part >/dev/null 2>&1 && DR_RUN=$(vward_keenetic_part nameservers 2>/dev/null) && [ -n "$DR_RUN" ]; then :
     else DR_RUN=$(vward_running_config 2>/dev/null) || return 0; fi
@@ -72,7 +79,10 @@ dns_rules_check()
                 for (l = 1; l <= lines && !found; l++) if (have[l, s] && have[l, dom[r]]) found = 1
                 if (!found) print srv[r], dom[r]
             }
-        }' - "$DR_LIVE")
+        }' - "$DR_LIVE") || return 0
+    # A rebuild during the comparison invalidates the result and any planned writes.
+    DR_CURRENT_SIG=$(md5sum < "$DR_LIVE" 2>/dev/null) || return 0
+    [ "${DR_CURRENT_SIG%% *}" = "$DR_SIG" ] || return 0
     DR_MISSN=$(printf '%s\n' "$DR_MISS" | grep -c .)
     DR_LIVEN=$((DR_WANT - DR_MISSN))
     if [ "$DR_MISSN" -eq 0 ]; then
@@ -82,19 +92,19 @@ dns_rules_check()
             awk '/^Name:/ {n = 1; next} n && /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+/ {ok = 1} END {exit !ok}'; then
             DR_RES=yes
         fi
-        printf 'RESULT=ok\nCONFIG=%s\nLIVE=%s\nTRIES=%s\nRESOLVES=%s\nAT=%s\n' "$DR_WANT" "$DR_LIVEN" "$DR_TRIES" "$DR_RES" "$NOW_EPOCH" > "$DR"
+        printf 'RESULT=ok\nCONFIG=%s\nLIVE=%s\nTRIES=%s\nRESOLVES=%s\nAT=%s\nSIGNATURE=%s\n' "$DR_WANT" "$DR_LIVEN" "$DR_TRIES" "$DR_RES" "$NOW_EPOCH" "$DR_SIG" > "$DR"
         echo "$NOW_TEXT|DNS_RULES result=ok config=$DR_WANT live=$DR_LIVEN tries=$DR_TRIES resolves=$DR_RES" >> "$DR_LOG"
         return 0
     fi
     if [ "$DR_LIVEN" -eq 0 ]; then
         # Not one rule found: the file may be written otherwise than read here. Nothing is done.
-        printf 'RESULT=unknown\nCONFIG=%s\nLIVE=0\nAT=%s\n' "$DR_WANT" "$NOW_EPOCH" > "$DR"
+        printf 'RESULT=unknown\nCONFIG=%s\nLIVE=0\nTRIES=%s\nAT=%s\nSIGNATURE=%s\n' "$DR_WANT" "$DR_TRIES" "$NOW_EPOCH" "$DR_SIG" > "$DR"
         echo "$NOW_TEXT|DNS_RULES result=unknown config=$DR_WANT live=0 file=$DR_LIVE" >> "$DR_LOG"
         return 0
     fi
     if [ "$DR_MODE" = observe ]; then
-        # Observation: once a boot, what would be given again is logged; nothing is sent.
-        printf 'RESULT=observed\nCONFIG=%s\nLIVE=%s\nAT=%s\n' "$DR_WANT" "$DR_LIVEN" "$NOW_EPOCH" > "$DR"
+        # Observation: log what would be given again; do not send a command.
+        printf 'RESULT=observed\nCONFIG=%s\nLIVE=%s\nTRIES=%s\nAT=%s\nSIGNATURE=%s\n' "$DR_WANT" "$DR_LIVEN" "$DR_TRIES" "$NOW_EPOCH" "$DR_SIG" > "$DR"
         echo "$NOW_TEXT|DNS_RULES result=mismatch_observed config=$DR_WANT live=$DR_LIVEN would_reapply=$DR_MISSN missing=$(printf '%s\n' "$DR_MISS" | awk 'NF == 2 {printf "%s%s", c, $2; c = ","}')" >> "$DR_LOG"
         return 0
     fi
@@ -117,8 +127,8 @@ EOF_DR
     echo "$NOW_TEXT|DNS_RULES result=mismatch config=$DR_WANT live=$DR_LIVEN reapplied=$DR_FIX try=$DR_TRIES missing=$(printf '%s\n' "$DR_MISS" | awk 'NF == 2 {printf "%s%s", c, $2; c = ","}')" >> "$DR_LOG"
 }
 
-# «dns-rules» (16.11.2026): the check above alone, run by the components agent (always on) once a minute until
-# it is done for this boot - not by this agent's own rounds: the VPN agent is off by default since fix.37, and
+# «dns-rules» (16.11.2026): the check above alone, scheduled by the components agent - not by
+# this agent's own rounds: the VPN agent is off by default since fix.37, and
 # the owner's Instagram rules stayed 1 of 16 after a reboot (www.instagram.com «имени нет» from the provider).
 # The component gate does not apply to it; the tunnel's device must be up.
 if [ "${1:-}" = dns-rules ]; then
@@ -130,6 +140,15 @@ if [ "${1:-}" = dns-rules ]; then
         DRT_FLAGS=; [ ! -r "$DRT_SYS/flags" ] || read -r DRT_FLAGS < "$DRT_SYS/flags" 2>/dev/null || :
         case "$DRT_FLAGS" in 0x*) [ $((DRT_FLAGS & 1)) -eq 1 ] || exit 0 ;; esac
     fi
+    VWARD_ADMISSION_LIB=${VWARD_ADMISSION_LIB:-/opt/lib/vward/vward-runtime-admission.sh}
+    [ -r "$VWARD_ADMISSION_LIB" ] || exit 1
+    . "$VWARD_ADMISSION_LIB"
+    vward_admission_enter dns-rules || exit $?
+    trap 'vward_admission_leave' EXIT
+    trap 'exit 130' HUP INT TERM
+    DRT_LOCK=${VWARD_ROUTE_CHANGE_LOCK:-${VWARD_ROOT_PREFIX:-}/tmp/vward-route-change.lock}
+    vward_lock_take "$DRT_LOCK" || exit 0
+    trap 'vward_lock_release "$DRT_LOCK"; vward_admission_leave' EXIT
     # shellcheck disable=SC2046
     set -- $(date '+%s %Y-%m-%d %H:%M:%S')
     NOW_EPOCH=$1 NOW_TEXT="$2 $3" LOG=${VWARD_DNS_RULES_LOG:-/opt/var/log/vward-tunnel-health.log}

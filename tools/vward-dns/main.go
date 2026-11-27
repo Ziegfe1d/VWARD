@@ -217,9 +217,11 @@ func serve(device string, address netip.Addr, port int) error {
 	return server.Shutdown(shutdown)
 }
 
-// Probe both services through the pilot listener or Keenetic :53.
+// Probe both services and YouTube's media DNS dependencies through the pilot or Keenetic :53.
 func probe(address string) error {
-	for _, host := range []string{"www.youtube.com.", "www.instagram.com."} {
+	for _, host := range []string{
+		"www.instagram.com.", "www.youtube.com.", "i.ytimg.com.", "redirector.googlevideo.com.",
+	} {
 		query := new(dns.Msg).SetQuestion(host, dns.TypeA)
 		client := &dns.Client{Timeout: probeDeadline}
 		response, _, err := client.Exchange(query, address)

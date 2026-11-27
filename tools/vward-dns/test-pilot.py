@@ -3,6 +3,7 @@
 
 import os
 from pathlib import Path
+import select
 import shutil
 import subprocess
 import tempfile
@@ -50,7 +51,7 @@ if cmd.startswith('no ip name-server '):
 else:
     assert cmd.startswith('ip name-server '), cmd
     rules.add(cmd)
-state.write_text('\n'.join(sorted(rules)) + '\n')
+state.write_text(''.join(f'{rule}\n' for rule in sorted(rules)))
 local = [r for r in rules if ':65153 ' in r]
 target = 'ip name-server 1.1.1.1 cdninstagram.com on OpkgTun0'
 lost = d / 'lost-live-rule'
@@ -60,7 +61,13 @@ if cmd == target:
     elif not local and os.environ.get('PILOT_DROP_PERSISTS') != '1':
         lost.unlink(missing_ok=True)
 active = [r.split()[2:4] for r in sorted(rules) if r != target or not lost.exists()]
-(d / 'live').write_text(''.join(f'dns_server = {ip if ":" in ip else ip + ":53"} {name}.\n' for ip, name in active))
+(d / 'live').write_text('dns_server = 192.0.2.53:53 .\n' +
+                       ''.join(f'dns_server = {ip if ":" in ip else ip + ":53"} {name}.\n' for ip, name in active))
+if os.environ.get('PILOT_LOST_ATTACHMENT_REPLY') == '1' and cmd == 'ip name-server 192.168.1.1:65153 ggpht.com':
+    sys.exit(1)
+if os.environ.get('PILOT_STALE_ATTACHMENT') == '1' and cmd == 'no ip name-server 192.168.1.1:65153 ytimg.com':
+    with (d / 'live').open('a') as stream:
+        print('dns_server = 192.168.1.1:65153 ytimg.com.', file=stream)
 if os.environ.get('PILOT_LOST_REPLY') == '1' and cmd == 'no ip name-server 1.1.1.1 cdninstagram.com on OpkgTun0':
     sys.exit(1)
 """)
@@ -85,24 +92,42 @@ esac
     }
     pending = fake / "opt/var/lib/vward/dns-pilot/pending"
 
+    # Keenetic's shell has awk but no comm applet.
+    invoke = 'comm() { echo "comm: not found" >&2; return 127; }; . "$0"'
+    pilot = SHELL + ["-c", invoke, str(HERE / "pilot.sh")]
+
     def call(action, **settings):
-        # Keenetic's shell has awk but no comm applet.
-        invoke = 'comm() { echo "comm: not found" >&2; return 127; }; . "$0"'
-        return subprocess.run(SHELL + ["-c", invoke, str(HERE / "pilot.sh"), action], env=env | settings,
-                              text=True, capture_output=True, timeout=60)
+        return subprocess.run(pilot + [action], env=env | settings, text=True, capture_output=True, timeout=60)
 
     def set_rules(rules):
-        state.write_text("\n".join(rules) + "\n")
+        state.write_text("".join(f"{rule}\n" for rule in rules))
         entries = [r.split()[2:4] for r in sorted(rules)]
-        live.write_text("".join(f"dns_server = {ip} {name}\n" for ip, name in entries))
+        live.write_text("dns_server = 192.0.2.53:53 .\n" +
+                        "".join(f"dns_server = {ip} {name}\n" for ip, name in entries))
 
-    def assert_restored():
-        assert sorted(state.read_text().splitlines()) == OLD
+    def assert_restored(expected=OLD):
+        assert sorted(state.read_text().splitlines()) == expected
+        assert live.read_text().splitlines()[0] == "dns_server = 192.0.2.53:53 ."
         active = sorted(f"ip name-server {server.removesuffix(':53')} {name.rstrip('.')} on OpkgTun0"
-                        for _, _, server, name in map(str.split, live.read_text().splitlines()))
-        assert active == OLD, active
+                        for _, _, server, name in map(str.split, live.read_text().splitlines()[1:]))
+        assert active == expected, active
         assert not pending.exists()
 
+    set_rules([])
+    result = call("plan")
+    assert result.returncode == 0 and "current_rules=0 active_rules=0" in result.stdout, result
+    assert not (fake / "mutations").exists(), "planning wrote the router"
+    result = call("trial", VWARD_DNS_PILOT_HOLD_SECONDS="181")
+    assert result.returncode and "invalid_hold_seconds" in result.stderr, result
+    assert not (fake / "mutations").exists()
+    for unverified in ("", "dns_server =\n", "dns_server = 9.9.9.9:53 *.www.youtube.com.\n"):
+        live.write_text(unverified)
+        result = call("trial")
+        assert result.returncode and "live_rules_unverified" in result.stderr, result
+        assert not (fake / "mutations").exists(), "pilot changed an unverified baseline"
+    set_rules(OLD[:1])
+    result = call("plan")
+    assert result.returncode and "dns_scope_differs_from_expected" in result.stderr, result
     set_rules(OLD)
     result = call("plan")
     assert result.returncode == 0 and "plan_ready" in result.stdout, result
@@ -116,9 +141,9 @@ esac
     # A correct running-config can coexist with only one active DNS rule.
     live.write_text("dns_server = 8.8.8.8 youtube.com\n")
     result = call("plan")
-    assert result.returncode and "legacy_live_rules_unverified" in result.stderr, result
+    assert result.returncode and "live_rules_unverified" in result.stderr, result
     result = call("trial")
-    assert result.returncode and "legacy_live_rules_unverified" in result.stderr, result
+    assert result.returncode and "live_rules_unverified" in result.stderr, result
     assert not (fake / "mutations").exists(), "an unverified live baseline was changed"
     set_rules(OLD)
 
@@ -126,6 +151,55 @@ esac
     assert (result.returncode == 0 and "result=trial_verified" in result.stdout
             and "result=original_dns_configuration_restored" in result.stdout), result
     assert_restored()
+
+    # The current Viva baseline contains no old media rules. Rejection and
+    # recovery must never bring those old rules back.
+    for settings, marker in (({}, "trial_verified"),
+                             ({"PILOT_LOST_ATTACHMENT_REPLY": "1"}, "attach_failed")):
+        (fake / "forwarded").unlink(missing_ok=True)
+        (fake / "mutations").unlink()
+        set_rules([])
+        result = call("trial", **settings)
+        assert (result.returncode == bool(settings) and marker in result.stdout + result.stderr
+                and "original_dns_configuration_restored" in result.stdout), result
+        assert_restored([])
+        assert all(":65153 " in line for line in (fake / "mutations").read_text().splitlines())
+
+    (fake / "forwarded").unlink(missing_ok=True)
+    result = call("trial", PILOT_STALE_ATTACHMENT="1")
+    assert result.returncode and "dns_restore_unverified" in result.stderr, result
+    assert pending.read_text() == "pilot_address=192.168.1.1\n"
+    set_rules([])
+    result = call("restore")
+    assert result.returncode == 0, result
+    assert_restored([])
+
+    pending.write_text("pilot_address=192.168.1.1\n" + OLD[0] + "\n")
+    result = call("restore")
+    assert result.returncode and "invalid_recovery_record" in result.stderr, result
+    pending.write_text("pilot_address=192.168.1.1\n")
+    set_rules(["ip name-server 192.168.1.1:65153 cdninstagram.com"])
+    result = call("restore", PILOT_LAN_ADDRESS="192.168.2.1")
+    assert result.returncode == 0, result
+    assert_restored([])
+
+    (fake / "forwarded").unlink(missing_ok=True)
+    with subprocess.Popen(pilot + ["trial"], env=env | {"VWARD_DNS_PILOT_HOLD_SECONDS": "90"},
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+        try:
+            # The binary fixture emits nothing before this pair of shell writes.
+            assert select.select([process.stdout], [], [], 12)[0], "trial never reached the hold"
+            assert process.stdout.readline() == b"result=trial_verified\n"
+            assert process.stdout.readline() == b"result=trial_hold seconds=90\n"
+            assert len(state.read_text().splitlines()) == 8 and pending.exists()
+            process.terminate()
+            output, errors = process.communicate(timeout=12)
+            assert process.returncode == 130 and b"original_dns_configuration_restored" in output, (output, errors)
+        finally:
+            if process.poll() is None:
+                process.kill()
+    assert_restored([])
+    set_rules(OLD)
 
     (fake / "forwarded").unlink(missing_ok=True)
     result = call("trial", PILOT_REJECT_ATTACHMENT="1")
