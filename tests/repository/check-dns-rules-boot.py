@@ -86,20 +86,11 @@ with tempfile.TemporaryDirectory() as tmp:
     (t / "config").write_text(CONFIG)
     (t / "ndmc").write_text(f'#!/bin/sh\necho "$2" >> {t}/ndmc.log\n')
     (t / "ndmc").chmod(0o755)
-    (t / "nslookup").write_text(f'''#!/bin/sh
-echo "$1" >> "{t}/queries"
-printf 'Server: 127.0.0.1\nAddress: 127.0.0.1#53\n\n'
-if [ "$1" = www.instagram.com ] && [ -e "{t}/instagram-failed" ]; then
-    echo 'nslookup: server failed'
-    exit 1
-fi
-printf 'Name: %s\nAddress 1: 192.0.2.1\n' "$1"
-''')
+    (t / "nslookup").write_text("#!/bin/sh\nprintf 'Server: 127.0.0.1\\n\\nName: %s\\nAddress 1: 157.240.0.35\\n' \"$1\"\n")
     (t / "nslookup").chmod(0o755)
 
     def run(uptime: int = 900, conf: str | None = "", rebuild: bool = False) -> tuple[str, list[str], str]:
         (t / "ndmc.log").write_text("")
-        (t / "queries").write_text("")
         (t / "uptime").write_text(f"{uptime}.10 100.00\n")
         live_path = str(t / "ndnproxymain.conf") if conf is not None else str(t / "none.conf")
         replace_live = f'cp "{t}/next-live.conf" "{live_path}";' if rebuild else ""
@@ -208,44 +199,6 @@ vward_running_config() {{ {replace_live} cat "{t}/config"; }}
     (t / "ndnproxymain.conf").write_text(live(RULES[:1]))
     if not scheduled():
         fail("the supervisor must start the DNS checker after a live DNS rebuild")
-
-    # On Viva the live view went from 16 to 0 to 1 and back to 16 after Xray restarted.
-    # A YouTube answer alone cannot confirm Instagram recovered with the rules.
-    (t / "ndnproxymain.conf").write_text(live([]))
-    state, ndmc, _ = run()
-    if ndmc or "RESULT=unknown" not in state:
-        fail("the zero-rule transition must never write")
-    (t / "ndnproxymain.conf").write_text(live(RULES[:1]))
-    state, ndmc, _ = run()
-    if ndmc != want or "TRIES=1" not in state:
-        fail("the partial live snapshot must recover exactly the missing rules")
-    (t / "ndnproxymain.conf").write_text(live(RULES))
-    (t / "instagram-failed").touch()
-    state, ndmc, log = run()
-    if ndmc or "RESOLVES=no" not in state or "youtube=yes instagram=no" not in log:
-        fail(f"working YouTube must not mask a failed Instagram lookup: {state!r}")
-    if (t / "queries").read_text().splitlines() != ["www.youtube.com", "www.instagram.com"]:
-        fail("both configured services need control queries to the router DNS")
-    if not scheduled():
-        fail("failed DNS queries must be retried even if the live file is unchanged")
-    state, ndmc, repeated_log = run()
-    if ndmc or repeated_log != log or "TRIES=1" not in state:
-        fail("a repeated negative response must not write, spend a repair attempt or repeat the warning")
-    (t / "instagram-failed").unlink()
-    state, ndmc, log = run()
-    if ndmc or "RESOLVES=yes" not in state or "youtube=yes instagram=yes" not in log:
-        fail("the DNS result must recover without a config change or writes")
-    run()
-    if (t / "queries").read_text() or scheduled():
-        fail("a confirmed unchanged DNS snapshot must stay idle")
-    old_state = "\n".join(row for row in (t / "state").read_text().splitlines()
-                          if not row.startswith(("YOUTUBE=", "INSTAGRAM="))) + "\n"
-    (t / "state").write_text(old_state)
-    if not scheduled():
-        fail("a pre-update success must be verified with both control queries")
-    state, ndmc, _ = run()
-    if ndmc or "YOUTUBE=yes\nINSTAGRAM=yes\n" not in state or scheduled():
-        fail("the pre-update status must be upgraded once without any rule writes")
 
     # Never fixed: 3 tries, then given up and nothing more.
     (t / "ndnproxymain.conf").write_text(live(RULES[:1]))

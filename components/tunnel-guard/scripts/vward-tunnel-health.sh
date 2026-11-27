@@ -27,12 +27,9 @@ dns_rules_check()
 {
     DR=${VWARD_DNS_RULES_STATE:-/tmp/vward-dns-rules}
     DR_LOG=${VWARD_DNS_RULES_LOG:-$LOG}
-    DR_RESULT='' DR_TRIES=0 DR_PREV_SIG='' DR_PREV_RES='' DR_PREV_YOUTUBE='' DR_PREV_INSTAGRAM=''
+    DR_RESULT='' DR_TRIES=0 DR_PREV_SIG=''
     [ ! -r "$DR" ] || while IFS='=' read -r K V; do
-        case "$K" in
-            RESULT) DR_RESULT=$V ;; TRIES) DR_TRIES=$V ;; SIGNATURE) DR_PREV_SIG=$V ;;
-            RESOLVES) DR_PREV_RES=$V ;; YOUTUBE) DR_PREV_YOUTUBE=$V ;; INSTAGRAM) DR_PREV_INSTAGRAM=$V ;;
-        esac
+        case "$K" in RESULT) DR_RESULT=$V ;; TRIES) DR_TRIES=$V ;; SIGNATURE) DR_PREV_SIG=$V ;; esac
     done < "$DR"
     case "$DR_RESULT" in gave_up|off) return 0 ;; esac
     case "$DR_TRIES" in ''|*[!0-9]*) DR_TRIES=0 ;; esac
@@ -62,15 +59,8 @@ dns_rules_check()
     fi
     DR_SIG=$(md5sum < "$DR_LIVE" 2>/dev/null) || return 0
     DR_SIG=${DR_SIG%% *}
-    DR_PROBE_ONLY=0
-    if [ "$DR_SIG" = "$DR_PREV_SIG" ]; then
-        [ "$DR_RESULT" = ok ] || return 0
-        # Recheck an unanswered query or a result from before per-service verification.
-        [ "$DR_PREV_RES" != yes ] || [ -z "$DR_PREV_YOUTUBE" ] || [ -z "$DR_PREV_INSTAGRAM" ] || return 0
-        DR_PROBE_ONLY=1
-    elif [ "$DR_RESULT" = ok ]; then
-        DR_TRIES=0
-    fi
+    [ "$DR_SIG" != "$DR_PREV_SIG" ] || return 0
+    [ "$DR_RESULT" != ok ] || DR_TRIES=0
     # Only «ip name-server»: its RCI subtree when proven (owner 08.11), else the whole config.
     if command -v vward_keenetic_part >/dev/null 2>&1 && DR_RUN=$(vward_keenetic_part nameservers 2>/dev/null) && [ -n "$DR_RUN" ]; then :
     else DR_RUN=$(vward_running_config 2>/dev/null) || return 0; fi
@@ -96,37 +86,16 @@ dns_rules_check()
     DR_MISSN=$(printf '%s\n' "$DR_MISS" | grep -c .)
     DR_LIVEN=$((DR_WANT - DR_MISSN))
     if [ "$DR_MISSN" -eq 0 ]; then
-        DR_PROBES=$(printf '%s\n' "$DR_RULES" | awk '
-            NF == 2 && !first {first = $2}
-            $2 == "youtube.com" || $2 == "www.youtube.com" {yt = 1}
-            $2 == "instagram.com" || $2 == "www.instagram.com" {ig = 1}
-            END {
-                if (yt) print "youtube www.youtube.com"
-                if (ig) print "instagram www.instagram.com"
-                if (!yt && !ig && first) print "other", first
-            }')
-        DR_RES=yes DR_YOUTUBE=skip DR_INSTAGRAM=skip
-        while read -r DR_SERVICE DR_HOST; do
-            [ -n "$DR_HOST" ] || continue
-            DR_ANSWER=no
-            if "${VWARD_NSLOOKUP:-nslookup}" "$DR_HOST" 127.0.0.1 2>/dev/null |
-                awk '/^Name:/ {n = 1; next} n && /^Address([[:space:]]+[0-9]+)?:[[:space:]]+[0-9]+([.][0-9]+){3}([[:space:]]|$)/ {ok = 1} END {exit !ok}'; then
-                DR_ANSWER=yes
-            else
-                DR_RES=no
-            fi
-            case "$DR_SERVICE" in youtube) DR_YOUTUBE=$DR_ANSWER ;; instagram) DR_INSTAGRAM=$DR_ANSWER ;; esac
-        done <<EOF_DR_PROBES
-$DR_PROBES
-EOF_DR_PROBES
-        DR_CURRENT_SIG=$(md5sum < "$DR_LIVE" 2>/dev/null) || return 0
-        [ "${DR_CURRENT_SIG%% *}" = "$DR_SIG" ] || return 0
-        [ "$DR_PROBE_ONLY" = 0 ] || [ "$DR_RES:$DR_YOUTUBE:$DR_INSTAGRAM" != "$DR_PREV_RES:$DR_PREV_YOUTUBE:$DR_PREV_INSTAGRAM" ] || return 0
-        printf 'RESULT=ok\nCONFIG=%s\nLIVE=%s\nTRIES=%s\nRESOLVES=%s\nYOUTUBE=%s\nINSTAGRAM=%s\nAT=%s\nSIGNATURE=%s\n' "$DR_WANT" "$DR_LIVEN" "$DR_TRIES" "$DR_RES" "$DR_YOUTUBE" "$DR_INSTAGRAM" "$NOW_EPOCH" "$DR_SIG" > "$DR"
-        echo "$NOW_TEXT|DNS_RULES result=ok config=$DR_WANT live=$DR_LIVEN tries=$DR_TRIES resolves=$DR_RES youtube=$DR_YOUTUBE instagram=$DR_INSTAGRAM" >> "$DR_LOG"
+        DR_RES=no
+        DR_FIRST=$(printf '%s\n' "$DR_RULES" | awk 'NF == 2 {print $2; exit}')
+        if [ -z "$DR_FIRST" ] || "${VWARD_NSLOOKUP:-nslookup}" "$DR_FIRST" 127.0.0.1 2>/dev/null |
+            awk '/^Name:/ {n = 1; next} n && /[0-9]+[.][0-9]+[.][0-9]+[.][0-9]+/ {ok = 1} END {exit !ok}'; then
+            DR_RES=yes
+        fi
+        printf 'RESULT=ok\nCONFIG=%s\nLIVE=%s\nTRIES=%s\nRESOLVES=%s\nAT=%s\nSIGNATURE=%s\n' "$DR_WANT" "$DR_LIVEN" "$DR_TRIES" "$DR_RES" "$NOW_EPOCH" "$DR_SIG" > "$DR"
+        echo "$NOW_TEXT|DNS_RULES result=ok config=$DR_WANT live=$DR_LIVEN tries=$DR_TRIES resolves=$DR_RES" >> "$DR_LOG"
         return 0
     fi
-    [ "$DR_PROBE_ONLY" = 0 ] || return 0
     if [ "$DR_LIVEN" -eq 0 ]; then
         # Not one rule found: the file may be written otherwise than read here. Nothing is done.
         printf 'RESULT=unknown\nCONFIG=%s\nLIVE=0\nTRIES=%s\nAT=%s\nSIGNATURE=%s\n' "$DR_WANT" "$DR_TRIES" "$NOW_EPOCH" "$DR_SIG" > "$DR"

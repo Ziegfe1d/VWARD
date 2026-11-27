@@ -913,7 +913,7 @@ function logEntry(raw) {
   if (code === 'DNS_RULES') {
     const fields = {};
     parts.forEach(p => {
-      const m = /^(result|config|live|reapplied|resolves|youtube|instagram)=(\w+)$/.exec(p);
+      const m = /^(result|config|live|reapplied|resolves)=(\w+)$/.exec(p);
       if (m) fields[m[1]] = m[2];
     });
     const active = 'Активно ' + fields.live + ' из ' + fields.config + ' правил DNS через VPN';
@@ -921,13 +921,8 @@ function logEntry(raw) {
     switch (fields.result) {
       case 'ok':
         text = active;
-        if (fields.resolves === 'no') {
-          const failed = [];
-          if (fields.youtube === 'no') failed.push('YouTube');
-          if (fields.instagram === 'no') failed.push('Instagram');
-          text += failed.length ? '. DNS не вернул IPv4 для ' + failed.join(' и ') :
-            '. Контрольный запрос не вернул IPv4-адрес';
-        } else level = 'ok';
+        if (fields.resolves === 'no') text += '. Контрольный запрос не вернул IPv4-адрес';
+        else level = 'ok';
         break;
       case 'mismatch':
         text = active + '. Keenetic принял ' + fields.reapplied + ' повторно поданных правил';
