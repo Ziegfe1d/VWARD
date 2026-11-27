@@ -50,6 +50,7 @@ if "Автоподбор:" in al or al.count('class="log-e') != 5:
 # Boot DNS rules and nightly scan: counts are observed, and only an actual
 # outcome may render completion. A control query can fail with all rules loaded.
 diagnostics = [
+    ("START_DEFERRED", "При запуске Entware автоподбор передан агенту компонентов", "info"),
     ("DNS_RULES|result=mismatch|config=16|live=1|reapplied=15", "Активно 1 из 16 правил DNS через VPN. Keenetic принял 15 повторно поданных правил", "warn"),
     ("DNS_RULES|result=ok|config=16|live=16|resolves=yes", "Активно 16 из 16 правил DNS через VPN", "ok"),
     ("DNS_RULES|result=ok|config=16|live=16|resolves=no", "Активно 16 из 16 правил DNS через VPN. Контрольный запрос не вернул IPv4-адрес", "warn"),
@@ -57,6 +58,7 @@ diagnostics = [
     ("DNS_RULES|result=gave_up|config=16|live=15|tries=3", "Активно 15 из 16 правил DNS через VPN. Попытки восстановления исчерпаны", "warn"),
     ("POLICY_SCAN_START", "Проверка IP-категорий запущена", "info"),
     ("POLICY_SCAN_ABORT|audit_rc=1", "Проверка IP-категорий завершилась с ошибкой (код 1)", "warn"),
+    ("POLICY_SCAN_ABORT|signal=TERM", "Проверка IP-категорий прервана", "warn"),
     ("POLICY_SCAN_ABORT|reason=summary_unconfirmed", "Проверка IP-категорий остановлена. Итог скана не подтверждён", "warn"),
     ("SKIPPED_TUNNEL_DOWN|health=none", "Проверка IP-категорий пропущена. Доступность VPN не подтверждена", "warn"),
     ("VLESS_ENGINE|failover OpkgTun0: applied server country could not be verified, current server kept", "Не удалось определить страну действующего VPN-сервера. Сервер сохранён.", "warn"),
