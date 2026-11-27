@@ -9,7 +9,9 @@ engine's event log.
 """
 
 import os
+import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -19,6 +21,43 @@ S91 = (ROOT / "components/runtime/init.d/S91vward-route-engine").read_text()
 
 def fail(message: str) -> None:
     raise SystemExit(f"FAIL: {message}")
+
+
+# Entware starts its scripts sequentially. A slow inspection inside S91 must
+# leave S92 free to start the components supervisor, which brings up VPN and routing.
+with tempfile.TemporaryDirectory() as tmp:
+    boot = Path(tmp)
+    shell = [shutil.which("busybox"), "sh"] if shutil.which("busybox") else ["sh"]
+    route = boot / "S91vward-route-engine"
+    runtime = boot / "S92vward-runtime"
+    launcher = boot / "rc.unslung"
+    profile = boot / "profile.sh"
+    events = boot / "events"
+    route.write_text(S91.replace("/opt/var/log/vward-route-engine-events.log", str(events)))
+    runtime.write_text("#!/bin/sh\nprintf 'runtime started\\n'\n")
+    runtime.chmod(0o755)
+    launcher.write_text(f'shift\n"$@"\n"{runtime}" start\n')
+    profile.write_text("vward_profile_load() { printf 'profile read\\n'; return 1; }\n")
+    env = os.environ | {"VWARD_PROFILE_LIB": str(profile), "VWARD_INITD": str(boot)}
+    result = subprocess.run(shell + [str(launcher), "start", *shell, str(route), "start"],
+                            env=env, capture_output=True, text=True, timeout=10)
+    if result.returncode or "runtime started" not in result.stdout or "profile read" in result.stdout:
+        fail(f"Entware startup must reach runtime without waiting for route discovery: {result.stdout!r}")
+    if "|START_DEFERRED\n" not in events.read_text():
+        fail("the deferred boot startup must be recorded")
+    launcher.write_text(f'. "{route}" start\n"{runtime}" start\n')
+    result = subprocess.run(shell + [str(launcher), "start"], env=env, capture_output=True, text=True, timeout=10)
+    if result.returncode or "runtime started" not in result.stdout or "profile read" in result.stdout:
+        fail(f"a sourced S91 must return to the Entware startup loop: {result.stdout!r}")
+    result = subprocess.run(shell + [str(route), "start"], env=env, capture_output=True, text=True, timeout=10)
+    if result.returncode != 1 or "profile read" not in result.stdout:
+        fail("manual start still runs and reports the route engine startup result")
+    runtime.chmod(0o644)
+    launcher.write_text(f'shift\n"$@"\nprintf "runtime unavailable\\n"\n')
+    result = subprocess.run(shell + [str(launcher), "start", *shell, str(route), "start"],
+                            env=env, capture_output=True, text=True, timeout=10)
+    if "profile read" not in result.stdout:
+        fail("Entware must start routing directly if its supervisor service is unavailable")
 
 
 start = S91.index("adaptive_core_count()\n")

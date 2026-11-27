@@ -120,7 +120,7 @@ with tempfile.TemporaryDirectory() as tmp:
     (log / "vward-tunnel-health.log").write_text(
         "2026-11-12 10:00:00|DOWN->UP|if=1\n"
         "2026-11-12 10:01:00|DNS_RULES result=mismatch config=16 live=1 reapplied=15 try=1 missing=private.example\n"
-        "2026-11-12 10:02:00|DNS_RULES result=ok config=16 live=16 tries=1 resolves=no\n"
+        "2026-11-12 10:02:00|DNS_RULES result=ok config=16 live=16 tries=1 resolves=no youtube=yes instagram=no instagram=private.example\n"
         "2026-11-12 10:03:00|DNS_RULES result=no_live_file\n")
     (log / "vward-policy-audit-chain.log").write_text(
         "2026-11-12 00:10:04 ===== AUDIT_CHAIN_START =====\n"
@@ -143,7 +143,7 @@ with tempfile.TemporaryDirectory() as tmp:
         fail(f"RED: name=all must answer every source once, each cut to count: {heads} {out[:400]!r}")
     samples = [
         "@@VWARD-LOG dnsrules\n2026-11-12 10:01:00|DNS_RULES|result=mismatch|config=16|live=1|reapplied=15|try=1",
-        "10:02:00|DNS_RULES|result=ok|config=16|live=16|tries=1|resolves=no",
+        "10:02:00|DNS_RULES|result=ok|config=16|live=16|tries=1|resolves=no|youtube=yes|instagram=no",
         "10:03:00|DNS_RULES|result=no_live_file",
         "@@VWARD-LOG policyrun\n2026-11-12 00:10:04|POLICY_SCAN_START",
         "00:10:09|POLICY_SCAN_ABORT|audit_rc=1",

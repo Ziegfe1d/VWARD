@@ -431,15 +431,18 @@ core_check()
 }
 
 # Check tunnel DNS rules on the existing minute tick. A finished check is reused
-# while the live DNS file is unchanged; an unchanged file needs no Keenetic API call.
+# while the live DNS file is unchanged and the control queries passed.
 DNS_RULES_BIN=${VWARD_DNS_RULES_BIN:-/opt/bin/vward-tunnel-health.sh}
 DNS_RULES_STATE=${VWARD_DNS_RULES_STATE:-/tmp/vward-dns-rules}
 dns_rules_tick()
 {
     [ -x "$DNS_RULES_BIN" ] || return 0
-    DRT_R= DRT_SIG=
+    DRT_R= DRT_SIG= DRT_RES= DRT_YOUTUBE= DRT_INSTAGRAM=
     [ ! -r "$DNS_RULES_STATE" ] || while IFS='=' read -r DRT_KEY DRT_VAL; do
-        case "$DRT_KEY" in RESULT) DRT_R=$DRT_VAL ;; SIGNATURE) DRT_SIG=$DRT_VAL ;; esac
+        case "$DRT_KEY" in
+            RESULT) DRT_R=$DRT_VAL ;; SIGNATURE) DRT_SIG=$DRT_VAL ;; RESOLVES) DRT_RES=$DRT_VAL ;;
+            YOUTUBE) DRT_YOUTUBE=$DRT_VAL ;; INSTAGRAM) DRT_INSTAGRAM=$DRT_VAL ;;
+        esac
     done < "$DNS_RULES_STATE"
     case "$DRT_R" in
         gave_up|off) return 0 ;;
@@ -451,7 +454,10 @@ dns_rules_tick()
                 break
             done
             if [ -n "$DRT_SIG" ] || [ "$DRT_R" = no_live_file ]; then
-                [ "${DRT_CURRENT%% *}" != "$DRT_SIG" ] || return 0
+                if [ "${DRT_CURRENT%% *}" = "$DRT_SIG" ]; then
+                    [ "$DRT_R" = ok ] || return 0
+                    [ "$DRT_RES" != yes ] || [ -z "$DRT_YOUTUBE" ] || [ -z "$DRT_INSTAGRAM" ] || return 0
+                fi
             fi
             ;;
     esac

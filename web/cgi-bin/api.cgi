@@ -3729,7 +3729,7 @@ if [ "$ACTION" = "log" ]; then
                     source == "dnsrules" && /^[^|]*\|DNS_RULES result=(ok|mismatch|mismatch_observed|gave_up|unknown|no_live_file)( |$)/ {
                         printf "%s|DNS_RULES|%s", substr($0, 1, 19), $3
                         for (i = 4; i <= NF; i++)
-                            if ($i ~ /^(config|live|reapplied|would_reapply|try|tries)=[0-9]+$/ || $i ~ /^resolves=(yes|no)$/)
+                            if ($i ~ /^(config|live|reapplied|would_reapply|try|tries)=[0-9]+$/ || $i ~ /^(resolves|youtube|instagram)=(yes|no)$/)
                                 printf "|%s", $i
                         printf "\n"
                     }
