@@ -51,6 +51,11 @@ with tempfile.TemporaryDirectory() as tmp:
                 return
             time.sleep(0.1)
 
+    if get("lists-data&view=summary").get("error") != "router_config_unavailable" or calls.exists():
+        fail("a cold dashboard without verified sections must not ask for the full configuration")
+    if get("awg-data&view=summary").get("lost") != [] or calls.exists():
+        fail("the dashboard must not scan native WireGuard imports")
+
     # No counts yet: the page does not wait for the slow answer, it comes in the background.
     first = get("lists-data")
     if first["lists"][0]["addresses"] is not None:
@@ -62,6 +67,28 @@ with tempfile.TemporaryDirectory() as tmp:
         fail(f"cached answer differs: {a} {b}")
     if count("show running-config") != 1 or count("show object-group fqdn") != 1:
         fail(f"the second refresh asked the router again: {calls.read_text()}")
+
+    shared = tmp / "shared"
+    shared.mkdir()
+    (shared / "running-config").write_text(running.read_text())
+    profile = tmp / "profile.sh"
+    profile.write_text('vward_profile_load() { return 0; }\n'
+                       '_vward_kc_fresh() { [ -s "$VWARD_KCACHE/running-config" ] && [ "${TEST_SNAPSHOT_AGE:-0}" -lt "$1" ]; }\n')
+    env.update(VWARD_PROFILE_LIB=str(profile), VWARD_KCACHE=str(shared))
+    summary = get("lists-data&view=summary")
+    if summary["lists"] != [{"name": "domain-list0", "description": "", "count": 1, "route": "",
+                             "via": "none", "auto": None, "smartdns_conflict": False}]:
+        fail(f"expected a count without domains or learned addresses: {summary}")
+    if count("show running-config") != 1 or count("show object-group fqdn") != 1:
+        fail("a dashboard with a snapshot must reuse it, without collecting addresses")
+    env["TEST_SNAPSHOT_AGE"] = "120"
+    stale = get("lists-data&view=summary")
+    if stale["lists"] != summary["lists"] or stale["stale_at"] != int((shared / "running-config").stat().st_mtime):
+        fail(f"old dashboard values must carry the timestamp of the cached snapshot: {stale}")
+    if count("show running-config") != 1 or count("show object-group fqdn") != 1:
+        fail("an old dashboard snapshot must not trigger a refresh of the whole configuration")
+    del env["TEST_SNAPSHOT_AGE"]
+    env["VWARD_PROFILE_LIB"] = "/nonexistent"
     # The route check of a domain looks at the same copy (fix.34: it read Keenetic each time).
     get("route-probe&type=domain&value=t.me")
     if count("show running-config") != 1:

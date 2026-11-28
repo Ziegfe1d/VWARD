@@ -81,6 +81,7 @@ with tempfile.TemporaryDirectory() as tmp:
         "VWARD_CONSOLE_EDIT_LOCK": str(tmp / "edit.lock"), "VWARD_CONSOLE_SETTINGS_LOCK": str(tmp / "settings.lock"),
         "VWARD_AGENTS_CONF": str(tmp / "agents.conf"),
         "VWARD_PROFILE_LIB": str(profile), "VWARD_ROOT_PREFIX": str(tmp / "root"),
+        "VWARD_CONSOLE_CACHE_DIR": str(tmp / "console-cache"), "VWARD_KCACHE": str(tmp / "keenetic-cache"),
         "VWARD_ADMISSION_LIB": str(ROOT / "components/runtime/lib/vward-runtime-admission.sh"),
         "VWARD_SETTINGS_REGISTRY": str(ROOT / "config/settings/settings-registry.json"),
     }
@@ -105,8 +106,24 @@ with tempfile.TemporaryDirectory() as tmp:
                 out.append(line.split()[1])
         return out
 
+    panel_cache = tmp / "console-cache"
+    router_cache = tmp / "keenetic-cache"
+    panel_cache.mkdir()
+    router_cache.mkdir()
+    (panel_cache / "fqdn-counts").write_text("cached")
+    (router_cache / "running-config").write_text(RUNNING)
+    run("journal", "keep", "7", expect="result=changed", rc=0)
+    if (etc / "journal.conf").read_text().strip() != "KEEP_DAYS=7":
+        fail("the journal setting must be saved")
+    if not (panel_cache / "fqdn-counts").exists() or not (router_cache / "running-config").exists():
+        fail("a journal setting must preserve both Keenetic caches")
+    if (tmp / "running.cfg.log").exists():
+        fail("a journal setting must not call Keenetic")
+
     # Route domains: add, idempotent add, remove, invalid input never reaches ndmc.
     run("route-domain", "add", "New.Example", expect="result=changed", rc=0)
+    if (panel_cache / "fqdn-counts").exists() or (router_cache / "running-config").exists():
+        fail("a route-domain change must invalidate the caches")
     if group("MyVPN") != ["old.example", "new.example"]:
         fail(f"domain not added to the policy group: {group('MyVPN')}")
     if (state / "groups-refresh").read_text().strip() != "0":

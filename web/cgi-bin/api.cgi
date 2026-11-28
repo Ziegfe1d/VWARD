@@ -112,11 +112,30 @@ fetch_json()
     printf '%s\n' "$FETCH_OUT"
 }
 
+# Keenetic's model and firmware are stable between boots. Keep them apart from
+# the live WAN/VPN state so each tab can share the same version answer.
+router_version()
+{
+    rv_file=${VWARD_CONSOLE_VERSION_CACHE:-/tmp/vward-console-version.json}
+    if [ -s "$rv_file" ]; then
+        rv_at=$(date -r "$rv_file" +%s 2>/dev/null) || rv_at=0
+        rv_age=$(( $(date +%s) - rv_at ))
+        if [ "$rv_age" -ge 0 ] && [ "$rv_age" -lt 300 ] && cat "$rv_file" 2>/dev/null; then
+            return 0
+        fi
+    fi
+    rv_json=$(fetch_json "$VWARD_RCI_BASE/show/version")
+    if [ "$rv_json" != '{}' ]; then
+        (umask 077; printf '%s\n' "$rv_json" > "$rv_file.$$" && mv -f "$rv_file.$$" "$rv_file") 2>/dev/null
+    fi
+    printf '%s\n' "$rv_json"
+}
+
 # ndm_cached NAME TTL COMMAND [FILTER]: a Keenetic "show" answer (passed through
 # the FILTER function, when given, so only the small result is kept) held TTL seconds in RAM
 # (root-only), so a console refreshing every few seconds does not make the
-# router serialize its whole configuration each time.  Any POST drops the
-# cache first, so a change is never followed by the old state.  With ndmc
+# router serialize its whole configuration each time. Router changes drop the
+# relevant cache so the next detailed view can read the applied state. With ndmc
 # replaced (tests) the cache is off unless VWARD_CONSOLE_CACHE_TTL says otherwise.
 NDM_CACHE_DIR=${VWARD_CONSOLE_CACHE_DIR:-/tmp/vward-console-cache}
 # Keenetic's whole configuration: 3.9-7.5 s a read on a busy router (Viva 25.10, keenetic-slow.log,
@@ -159,6 +178,36 @@ ndm_cached()
         (umask 077; mkdir -p "$NDM_CACHE_DIR" && { date +%s; printf '%s\n' "$nc_out"; } > "$nc_file.$$" && mv -f "$nc_file.$$" "$nc_file") 2>/dev/null
     fi
     printf '%s\n' "$nc_out"
+}
+
+# Only use already verified sections here. A page view must not trigger a full
+# read to establish parity or fall back to one when RCI does not answer.
+overview_verified_sections()
+{
+    command -v vward_keenetic_part >/dev/null 2>&1 || return 1
+    for osp in groups dnsproxy iproutes; do
+        [ -f "$VWARD_KPART/$osp.ok" ] && [ ! -e "$VWARD_KPART/$osp.bad" ] || return 1
+    done
+    for osp in groups dnsproxy iproutes; do
+        vward_keenetic_part "$osp" verified || return 1
+    done
+}
+
+overview_router_sections()
+{
+    if command -v _vward_kc_fresh >/dev/null 2>&1 &&
+       _vward_kc_fresh "$CONFIG_TTL" && cat "$VWARD_KCACHE/running-config" 2>/dev/null; then
+        return 0
+    fi
+    if ors_data=$(overview_verified_sections) && [ -n "$ors_data" ]; then
+        printf '%s\n' "$ors_data"
+        return 0
+    fi
+    command -v _vward_kc_fresh >/dev/null 2>&1 &&
+        _vward_kc_fresh "${VWARD_CONSOLE_CONFIG_STALE:-86400}" || return 1
+    ors_at=$(date -r "$VWARD_KCACHE/running-config" +%s 2>/dev/null) || return 1
+    printf 'vward-snapshot-at %s\n' "$ors_at"
+    cat "$VWARD_KCACHE/running-config" 2>/dev/null
 }
 
 # ndm_cached_bg NAME TTL COMMAND [FILTER]: for slow answers whose exact value may
@@ -514,10 +563,11 @@ if [ "$AUTH_ENABLED" = 1 ] && [ "$ACTION" != auth ] && [ "$ACTION" != ping ] && 
     exit 0
 fi
 
-# A change from the Panel: saved router answers go, the next page shows the
-# router as it is now. A note for the bell's history changes nothing on the router; two
-# changes at once may both remove the folder (quiet: the other one did it).
-[ "${REQUEST_METHOD:-GET}" != POST ] || [ "$ACTION" = notes ] || rm -rf "${NDM_CACHE_DIR:?}" 2>/dev/null
+# The config handler invalidates after validation and keeps the cache for journal
+# operations. Notes only update the bell's history.
+if [ "${REQUEST_METHOD:-GET}" = POST ]; then
+    case "$ACTION" in notes|config) ;; *) rm -rf "${NDM_CACHE_DIR:?}" 2>/dev/null ;; esac
+fi
 
 # vward-off: the emergency switch («Отключить VWARD», vward-off.sh). GET: its state. POST
 # op=off (confirm=VWARD_OFF) or op=on: detached, thousands of routes take minutes; the Panel
@@ -924,6 +974,7 @@ if [ "$ACTION" = config ]; then
     [ "$OP:$TARGET:$VALUE" != wifi:CONTROL_ENABLED:1 ] || REQUIRED=WIFI_CONTROL_ENABLE
     [ -z "$REQUIRED" ] || [ "$CONFIRM" = "$REQUIRED" ] || { echo '{"ok":false,"error":"confirmation_required"}'; exit 0; }
     [ -x "$CONFIG_HELPER" ] || { echo '{"ok":false,"error":"action_unavailable"}'; exit 0; }
+    [ "$OP" = journal ] || rm -rf "${NDM_CACHE_DIR:?}" 2>/dev/null
     OALL="$("$CONFIG_HELPER" "$@" 2>/dev/null)"
     OUT="$(printf '%s\n' "$OALL" | tail -n 1)"
     # A refusal of Keenetic carries the command and its answer (reason=): shown in the Panel.
@@ -2649,7 +2700,13 @@ fi
 if [ "$ACTION" = lists-data ]; then
     header_json
     [ "${REQUEST_METHOD:-GET}" = GET ] || { echo '{"ok":false,"error":"method_not_allowed"}'; exit 0; }
-    RUNNING="$(ndm_cached running "$CONFIG_TTL" "show running-config")"
+    SUMMARY=false
+    if [ "$(qget view)" = summary ]; then
+        SUMMARY=true
+        RUNNING="$(overview_router_sections)" || { echo '{"ok":false,"error":"router_config_unavailable"}'; exit 0; }
+    else
+        RUNNING="$(ndm_cached running "$CONFIG_TTL" "show running-config")"
+    fi
     [ -n "$RUNNING" ] || { echo '{"ok":false,"error":"router_config_unavailable"}'; exit 0; }
     LISTS_CONF=${VWARD_DOMAIN_LISTS_CONF:-$CONFIG_ETC/route-engine/domain-lists.conf}
     LISTS_STATE=$CONFIG_ETC/route-engine/domain-lists
@@ -2663,7 +2720,7 @@ if [ "$ACTION" = lists-data ]; then
         LD_STATE=off
     elif [ -n "$LD_URL" ]; then
         LD_STATE=unknown
-        if command -v vward_doh_alive >/dev/null 2>&1; then
+        if [ "$SUMMARY" = false ] && command -v vward_doh_alive >/dev/null 2>&1; then
             VWARD_DOH_ALIVE_MT=4 vward_doh_alive "$LD_URL"; LD_RC=$?
             case "$LD_RC" in 0) LD_STATE=ready ;; 1) LD_STATE=dead ;; esac
         fi
@@ -2689,11 +2746,14 @@ if [ "$ACTION" = lists-data ]; then
     # The answer lists every learned address (hundreds of KB on a busy router):
     # only the per-group counts are kept.
     fqdn_counts() { awk '$1 == "group-name:" {g = $2} $1 == "ipv4-addresses-count:" && g != "" {print g "\t" $2; g = ""}'; }
-    ADDRS="$(ndm_cached_bg fqdn-counts 120 "show object-group fqdn" fqdn_counts |
-        "$JQ" -Rn '[inputs | split("\t") | {(.[0]): (.[1] | tonumber? // null)}] | add // {}' 2>/dev/null)"
+    if [ "$SUMMARY" = false ]; then
+        ADDRS="$(ndm_cached_bg fqdn-counts 120 "show object-group fqdn" fqdn_counts |
+            "$JQ" -Rn '[inputs | split("\t") | {(.[0]): (.[1] | tonumber? // null)}] | add // {}' 2>/dev/null)"
+    fi
     [ -n "$ADDRS" ] || ADDRS='{}'
     # G name / N name description / I name domain / R name target / D domain (Smart DNS)
     printf '%s\n' "$RUNNING" | awk '
+        /^vward-snapshot-at [0-9]+$/ {print "T\t" $2; next}
         /^object-group fqdn / {cur = $3; print "G\t" cur "\t"; next}
         /^!/ {cur = ""; ctx = 0}
         /^[^ \t!]/ {ctx = ($1 == "dns-proxy" && NF == 1)}
@@ -2705,13 +2765,14 @@ if [ "$ACTION" = lists-data ]; then
         # under «auto» and the tunnel page showed one subnet fewer than the Overview (199 / 200).
         /^ip route [0-9]/ && $4 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && NF >= 5 {print "S\t" $5 "\t" $3 "\t" $4; next}
         /^ip route [0-9]/ && NF >= 4 {print "S\t" $4 "\t" $3 "\t255.255.255.255"}
-    ' | { cat; command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains | sed 's/^/A\t/'; } | "$JQ" -Rn --arg tun "${VWARD_TUNNEL_INTERFACE:-}" --arg dev "${VWARD_TUNNEL_DEVICE:-}" --arg wan "${VWARD_WAN_INTERFACE:-}" \
+    ' | { cat; command -v vward_agh_smartdns_domains >/dev/null 2>&1 && vward_agh_smartdns_domains | sed 's/^/A\t/'; } | "$JQ" -Rn --argjson summary "$SUMMARY" --arg tun "${VWARD_TUNNEL_INTERFACE:-}" --arg dev "${VWARD_TUNNEL_DEVICE:-}" --arg wan "${VWARD_WAN_INTERFACE:-}" \
         --argjson guard "$([ "$(awk -F= '$1 == "smartdns_guard" {print $2; exit}' "$LISTS_CONF" 2>/dev/null)" = 0 ] && echo false || echo true)" \
         --arg dns_state "$LD_STATE" --argjson dns_lists "$LD_LISTS" \
         --argjson watched "$WATCHED" --argjson managed "$MANAGED" --argjson unmanaged "$UNMANAGED" --argjson returns "$RETURNS" --argjson auto "$AUTO" --argjson addrs "$ADDRS" '
         def bits: {"255":8,"254":7,"252":6,"248":5,"240":4,"224":3,"192":2,"128":1,"0":0}[.] // 0;
-        reduce (inputs | split("\t")) as $r ({g: {}, order: [], r: {}, doh: [], agh: [], s: {}};
-            if $r[0] == "G" then (if .g[$r[1]] then . else .g[$r[1]] = {description: "", domains: []} | .order += [$r[1]] end)
+        reduce (inputs | split("\t")) as $r ({g: {}, order: [], r: {}, doh: [], agh: [], s: {}, stale_at: null};
+            if $r[0] == "T" then .stale_at = ($r[1] | tonumber)
+            elif $r[0] == "G" then (if .g[$r[1]] then . else .g[$r[1]] = {description: "", domains: []} | .order += [$r[1]] end)
             elif $r[0] == "N" then .g[$r[1]].description = $r[2]
             elif $r[0] == "I" then .g[$r[1]].domains += [$r[2]]
             elif $r[0] == "R" then .r[$r[1]] = (.r[$r[1]] // $r[2])
@@ -2735,7 +2796,8 @@ if [ "$ACTION" = lists-data ]; then
                 any($s.doh[] as $d | $l.domains[] as $i | $d == $i or ($d | endswith("." + $i)) or ($i | endswith("." + $d)); .)),
               watch: ($watched | index([$n]) != null), returnable: ($returns | index([$n]) != null), dns_mode: ($dns_lists | index([$n]) != null),
               managed: (($managed | index([$n]) != null) and ($unmanaged | index([$n]) == null)),
-              auto: ($auto[$n] // null), addresses: ($addrs[$n] // null)}]}'
+              auto: ($auto[$n] // null), addresses: ($addrs[$n] // null)}]}
+        | if $summary then {ok, stale_at: $s.stale_at, subnet_counts, lists: [.lists[] | {name, description, count, route, via, auto, smartdns_conflict}]} else . end'
     exit 0
 fi
 
@@ -3094,7 +3156,9 @@ if [ "$ACTION" = awg-data ]; then
     # Keenetic's own WireGuard tunnels that came from an AmneziaWG 3.x file: its import
     # keeps H1-H4 = 1 2 3 4 with S3/S4 but drops the header protection key, so they
     # never connect.  The engine can take them over once it has the file.
-    AWG_LOST="$(ndm_cached running "$CONFIG_TTL" "show running-config" | awk '
+    AWG_LOST='[]'
+    if [ "$(qget view)" != summary ]; then
+        AWG_LOST="$(ndm_cached running "$CONFIG_TTL" "show running-config" | awk '
         /^interface [^ ]+$/ {cur = $2; desc = ""; asc = ""; peer = ""; next}
         cur != "" && $1 == "description" {d = $0; sub(/^[ \t]*description[ \t]*/, "", d); gsub(/"/, "", d); desc = d}
         cur != "" && $1 == "wireguard" && $2 == "asc" {asc = $0}
@@ -3105,7 +3169,8 @@ if [ "$ACTION" = awg-data ]; then
             if (n >= 14 && a[9] == "1" && a[10] == "2" && a[11] == "3" && a[12] == "4") print cur "\t" desc "\t" peer
             cur = ""
         }' | "$JQ" -Rn '[inputs | split("\t") | {name: .[0], description: .[1], peer: .[2]}]' 2>/dev/null)"
-    [ -n "$AWG_LOST" ] || AWG_LOST='[]'
+        [ -n "$AWG_LOST" ] || AWG_LOST='[]'
+    fi
     # VLESS servers held by Xray on OpkgTun connections (the VLESS engine), never the ids.
     VLESS_BIN=${VWARD_VLESS_ENGINE_BIN:-/opt/bin/vward-vless-engine.sh}
     AWG_VLESS='{"installed":false,"version":"","tunnels":[]}'
@@ -3828,14 +3893,14 @@ if [ "$ACTION" = "log" ]; then
     exit 0
 fi
 
-# The four router queries run side by side: one after another they were most of
+# The live router queries run side by side: one after another they were most of
 # the time the overview waited for.
 ISP_URL=""
 [ -z "${VWARD_WAN_INTERFACE:-}" ] || ISP_URL="$VWARD_RCI_BASE/show/interface?name=$VWARD_WAN_INTERFACE"
 FETCH_DIR="$(umask 077; mktemp -d /tmp/vward-console-status.XXXXXX 2>/dev/null)" || FETCH_DIR=""
 if [ -n "$FETCH_DIR" ]; then
     trap 'rm -rf "${FETCH_DIR:?}"' EXIT
-    fetch_json "$VWARD_RCI_BASE/show/version" > "$FETCH_DIR/ver" &
+    router_version > "$FETCH_DIR/ver" &
     [ -z "$ISP_URL" ] || fetch_json "$ISP_URL" > "$FETCH_DIR/isp" &
     fetch_json "$VWARD_RCI_BASE/show/internet/status" > "$FETCH_DIR/inet" &
     fetch_json "$VWARD_RCI_BASE/show/interface" > "$FETCH_DIR/ifaces" &
@@ -3845,7 +3910,7 @@ if [ -n "$FETCH_DIR" ]; then
     INET="$(cat "$FETCH_DIR/inet" 2>/dev/null)"
     IFACES="$(cat "$FETCH_DIR/ifaces" 2>/dev/null)"
 else
-    VER="$(fetch_json "$VWARD_RCI_BASE/show/version")"
+    VER="$(router_version)"
     ISP=""
     [ -z "$ISP_URL" ] || ISP="$(fetch_json "$ISP_URL")"
     INET="$(fetch_json "$VWARD_RCI_BASE/show/internet/status")"
@@ -3869,7 +3934,12 @@ else
 fi
 
 # WireGuard connections with obfuscation (`wireguard asc`) are AmneziaWG in Keenetic's firmware.
-AWG_NAMES="$(ndm_cached running "$CONFIG_TTL" "show running-config" | awk '/^interface [^ ]+$/ {cur = $2; next} /^!/ {cur = ""} cur != "" && $1 == "wireguard" && $2 == "asc" {print cur}' | tr '\n' ' ')"
+AWG_NAMES=
+if printf '%s\n' "$IFACES" | "$JQ" -e --arg wan "${VWARD_WAN_INTERFACE:-}" '
+    to_entries | any(.key != $wan and (.value | type == "object") and
+        ((.value.type // "") | tostring | ascii_downcase) == "wireguard")' >/dev/null 2>&1; then
+    AWG_NAMES="$(ndm_cached running "$CONFIG_TTL" "show running-config" | awk '/^interface [^ ]+$/ {cur = $2; next} /^!/ {cur = ""} cur != "" && $1 == "wireguard" && $2 == "asc" {print cur}' | tr '\n' ' ')"
+fi
 WG_INTERFACES="$(
     printf '%s\n' "$IFACES" |
     "$JQ" -c --arg types "${VWARD_VPN_TYPES:-wireguard openvpn sstp pptp l2tp ike ipsec proxy opkgtun}" --arg wan "${VWARD_WAN_INTERFACE:-}" --arg awgn " $AWG_NAMES" '
