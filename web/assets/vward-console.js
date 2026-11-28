@@ -626,6 +626,7 @@ const ADSV = { filter: 'all', search: '', blockedSearch: '', allowedSearch: '', 
 const FILES = { root: '', path: '' };
 const LOADERS = {
   status: () => apiGet('status'), route: () => apiGet('route-data'), update: () => apiGet('update-data'), lists: () => apiGet('lists-data'),
+  listsOverview: () => apiGet('lists-data', { view: 'summary' }), awgOverview: () => apiGet('awg-data', { view: 'summary' }),
   security: () => apiGet('security-data'), diag: () => apiGet('diagnostics'), wifi: () => apiGet('wifi-data'),
   ads: () => apiGet('ads-data'), https: () => apiGet('ads-https-data'), config: () => apiGet('config-data'),
   adsstats: () => apiGet('ads-view', { view: 'stats' }), agh: () => apiGet('ads-view', { view: 'agh' }), backups: () => apiGet('backup-data'), ext: () => apiGet('ext-update-data'),
@@ -662,7 +663,7 @@ const inflight = {};
 // by the second (status, jobs) follows every tick; settings and catalogs rarely change, and
 // asking them every 15 seconds only loaded the router. An action reloads what it changed.
 const KEY_TTL = { off: 10, notes: 25, status: 5, ads: 10, tq: 55, route: 55, awg: 25, wifi: 55, diag: 55, stab: 55, lists: 110, config: 110, adspub: 55, adsstats: 110, agh: 110,
-  https: 290, security: 290, services: 290, update: 110, ext: 590, backups: 290, cron: 110 };
+  https: 290, security: 290, services: 290, update: 110, ext: 590, backups: 290, cron: 110, listsOverview: 110, awgOverview: 25 };
 // «Запустить проверку»: the progress, the result or the error stay on the page (the bell is only
 // an extra channel). load() keeps errors in S.errors, so a failed run is not reported as done.
 let DIAG_RUN = null;
@@ -719,7 +720,7 @@ const cfgRoute = () => cfg().route || {};
 
 /* ---------- Структура разделов ---------- */
 const PAGES = [
-  { id: 'overview', title: 'Обзор', icon: 'home', group: 'Главное', data: ['status', 'route', 'ads', 'adsstats', 'lists', 'awg', 'tq'] },
+  { id: 'overview', title: 'Обзор', icon: 'home', group: 'Главное', data: ['status', 'route', 'ads', 'adsstats', 'listsOverview', 'awgOverview', 'tq'] },
   { id: 'wan', title: 'Сеть', icon: 'globe', group: 'Сеть', data: ['status', 'security', 'config'] },
   { id: 'vpn', title: 'VPN', icon: 'shield', group: 'Сеть', data: ['status', 'security', 'config', 'route', 'awg', 'ext', 'tq'] },
   { id: 'routes', title: 'Маршруты', icon: 'list', group: 'Сеть', data: ['route', 'security', 'status', 'config', 'lists', 'services'] },
@@ -1340,7 +1341,8 @@ function notifications() {
     // A timeout is a busy Keenetic, not a lost one (a Viva 2026-10-13: «Нет связи» while it answered slowly).
     ? { sev: 'warn', title: 'Роутер отвечает медленно', text: S.errors.status + ', VWARD повторит сам', to: 'system' }
     : { sev: 'crit', title: /^нет связи/.test(S.errors.status) ? 'Нет связи с роутером' : 'Роутер отвечает с ошибкой', text: S.errors.status, to: 'system' });
-  const sdc = ((S.lists && S.lists.lists) || []).filter(l => l.smartdns_conflict);
+  const lists = visibleLists() || {};
+  const sdc = lists.stale_at ? [] : (lists.lists || []).filter(l => l.smartdns_conflict);
   if (sdc.length) n.push({ sev: 'warn', title: 'Smart DNS уйдёт в VPN', text: 'Домены Smart DNS есть в списках через VPN: ' + sdc.map(l => l.description || l.name).join(', '), to: 'lists' });
   if (!s) return n;
   // What the owner switched off in «Управление» is not forgotten (owner 2026-10-17).
@@ -1393,8 +1395,16 @@ const viaIs = (l, v) => l.via === v;
 // ---- What goes where: one summary of the routes (owner 13.11.2026, one value - one place) ----
 // The «Маршруты» page, the Overview's cards and a tunnel's page show these numbers; none counts its own.
 // null: not loaded yet («—»), never a guessed zero.
+function visibleLists() {
+  if (current !== 'overview') return S.lists;
+  if (S.listsOverview && S.listsOverview.ok) {
+    const summaryAt = S.listsOverview.stale_at ? S.listsOverview.stale_at * 1000 : S.loadedAt.listsOverview;
+    if (!S.lists || summaryAt >= (S.loadedAt.lists || S.cached.lists || 0)) return S.listsOverview;
+  }
+  return S.lists;
+}
 function routeSummary() {
-  const L = S.lists, r = S.route || {}, ip = r.ip || {}, all = L ? L.lists || [] : null;
+  const L = visibleLists(), r = S.route || {}, ip = r.ip || {}, all = L ? L.lists || [] : null;
   const own = all ? all.filter(l => !svcOf(l.name)) : null;
   // The API sends at most 300 subnets a tunnel; its count is the real one (Viva 2026-10-17).
   const netsOf = name => !L ? null : (L.subnet_counts || {})[name] != null ? num(L.subnet_counts[name]) || 0 : ((L.subnets || {})[name] || []).length;
@@ -1422,7 +1432,7 @@ function wifiWarnText(wf) {
   return wifiName(c.mac) + ': ' + (c.recommendation === 'bind_2g' ? 'лучше 2,4 ГГц' : 'проверить');
 }
 // Which router answer each card is drawn from.
-const CARD_KEY = { system: 'status', updates: 'status', wan: 'status', vpn: 'status', storage: 'status', lists: 'lists', routes: 'route', wifi: 'wifi', ads: 'ads' };
+const CARD_KEY = { system: 'status', updates: 'status', wan: 'status', vpn: 'status', storage: 'status', lists: 'listsOverview', routes: 'route', wifi: 'wifi', ads: 'ads' };
 // Little space: under 256 MB, or under a tenth and under 1 GB (a tenth of a big drive is plenty).
 const lowDisk = (total, free) => free < 262144 || (free / total < 0.1 && free < 1048576);
 // The version for people (owner 01.11.2026, ROADMAP §3): «0.2.0 RC2 #36.1.261111» - the stage, the
@@ -1511,6 +1521,8 @@ function updateSummary() {
 }
 function cardData(id) {
   const s = st(), p = plat(), w = s.wan || {}, wg = s.wg || {}, sv = s.services || {}, g = s.storage || {}, r = S.route || {}, wf = S.wifi || {}, a = S.ads || {};
+  const listsAt = (visibleLists() || {}).stale_at;
+  const listsAge = listsAt ? ['warn', 'Данные на ' + fmtStamp(listsAt)] : null;
   const tunnels = wg.interfaces || [], up = tunnels.filter(t => isTrue(t.connected)).length;
   const comps = Object.keys(p.components || {}).length;
   const warnWifi = (wf.clients || []).filter(c => c.health === 'WARNING').length;
@@ -1535,7 +1547,8 @@ function cardData(id) {
     }
     case 'lists': {
       const rs = routeSummary(), vpn = rs.vpnLists || 0, around = rs.bypassLists || 0, auto = rs.autoMoved || 0;
-      return { icon: 'list', title: 'Доменные списки', to: 'lists', value: S.lists ? vpn + ' через VPN' : '—', sub: S.lists ? (vpn && vpnDirect() ? 'сейчас напрямую' : around + ' в обход') : 'списки Keenetic', pill: !S.lists ? ['', '—'] : vpn && vpnDirect() ? ['warn', 'Напрямую'] : auto ? ['warn', 'Переведено авто: ' + auto] : ['info', rs.all + ' ' + plural(rs.all, 'список', 'списка', 'списков')] };
+      const known = rs.all != null;
+      return { icon: 'list', title: 'Доменные списки', to: 'lists', value: known ? vpn + ' через VPN' : '—', sub: known ? (vpn && vpnDirect() ? 'сейчас напрямую' : around + ' в обход') : 'открыть списки Keenetic', pill: listsAge || (!known ? ['', '—'] : vpn && vpnDirect() ? ['warn', 'Напрямую'] : auto ? ['warn', 'Переведено авто: ' + auto] : ['info', rs.all + ' ' + plural(rs.all, 'список', 'списка', 'списков')]) };
     }
     // What goes through VPN, from the one summary: the tunnels' subnets (the IP categories' routes among them),
     // and the domains of the lists under them; no subnets - the domains first. One short line under the value.
@@ -1544,7 +1557,7 @@ function cardData(id) {
       return { icon: 'route', title: 'Маршруты', to: 'routes',
         value: rs.lists == null ? '—' : rs.nets ? fmtInt(rs.nets) + ' ' + plural(rs.nets, 'подсеть', 'подсети', 'подсетей') : doms,
         sub: vpnDirect() ? 'сейчас напрямую' : rs.lists == null ? 'списки и подсети' : rs.nets ? doms + ' ' + inl : inl,
-        pill: !S.route && !S.lists ? ['', '—'] : vpnDirect() ? ['warn', 'Напрямую'] : ['ok', 'Работает'] }; }
+        pill: listsAge || (!S.route && rs.all == null ? ['', '—'] : vpnDirect() ? ['warn', 'Напрямую'] : ['ok', 'Работает']) }; }
     case 'wifi': return { icon: 'wifi', title: 'Wi-Fi клиенты', to: 'wifi', value: S.wifi && !wf.enabled ? '—' : fmtInt(wf.count) + ' ' + plural(num(wf.count) || 0, 'клиент', 'клиента', 'клиентов'), sub: wf.enabled ? (warnWifi ? wifiWarnText(wf) : 'без замечаний') : 'сбор данных выключен', pill: !S.wifi ? ['', '—'] : warnWifi ? ['warn', 'Внимание'] : wf.enabled ? ['ok', 'Работает'] : ['', 'Выключен'] };
     // What AdGuard Home blocked today (the domains VWARD itself blocked are a handful and read as
     // «almost nothing blocked»: they are on the Ads page).
@@ -3878,7 +3891,7 @@ function recText(c) { return c.recommendation === 'bind_2g' ? 'Закрепит�
 // The lists and subnets of the old tunnel besides VWARD's own: a lost tunnel always gives them
 // up (it carries nothing), a working one asks (Viva 2026-10-19: 19 lists stayed on OpkgTun2).
 function tunUseExtra(cur) {
-  const L = S.lists || {}, own = cfgRoute().group || prof().policy_group;
+  const L = visibleLists() || {}, own = cfgRoute().group || prof().policy_group;
   const lists = (L.lists || []).filter(l => l.route === cur && l.name !== own && l.name !== 'AdaptiveAuto').length;
   return lists + (routeSummary().netsOf(cur) || 0);
 }
@@ -3947,7 +3960,8 @@ function tunnelMorePanel(name, t, e, v, managed) {
 // (awg-data lost[]): the same files move them to the engine, matched by server key.
 const awgLost = () => (S.awg && S.awg.lost) || [];
 // A tunnel's line in the list: the handshake; for the engine's tunnels it comes from the engine.
-const vlessOf = name => ((S.awg && S.awg.vless && S.awg.vless.tunnels) || []).find(x => x.name === name);
+const tunnelModuleState = () => (current === 'overview' && S.awgOverview && S.awgOverview.ok ? S.awgOverview : S.awg) || {};
+const vlessOf = name => (((tunnelModuleState().vless || {}).tunnels) || []).find(x => x.name === name);
 const modOff = m => ((st().services || {}).modules_off || []).includes(m);
 // ---- «Компоненты»: install, on/off, reinstall, reset, remove (fix.32) ----
 // One operation at a time: while one runs (here or after a reboot) the buttons wait.
@@ -4043,12 +4057,15 @@ function compCard(id, name, kind, desc) {
     (f.installed ? mgmtNote('Обновление пакета - в «Обновления программ». Удаление и сброс из Панели VWARD появятся в следующем выпуске.') : compPanel(kind));
 }
 const TUN_TYPE = { wireguard: 'WireGuard', openvpn: 'OpenVPN', sstp: 'SSTP', pptp: 'PPTP', l2tp: 'L2TP', ike: 'IPsec', ipsec: 'IPsec', proxy: 'Proxy', opkgtun: 'OpkgTun' };
-const awgOf = name => ((S.awg && S.awg.tunnels) || []).find(x => x.name === name);
+const awgOf = name => (tunnelModuleState().tunnels || []).find(x => x.name === name);
 // A VWARD engine's tunnel whose settings are gone (the USB stick formatted, owner 2026-10-18):
 // Keenetic keeps the OpkgTun connection, no engine holds it. Known once the engines answered.
 // A tunnel that is up or connected has its program whatever the engines' answer says (a slow
 // Keenetic cut that answer short and a working new tunnel read «Нет настроек», Viva 2026-10-18).
-const tunLost = t => !!(t && S.awg && S.awg.vless && Array.isArray(S.awg.vless.tunnels) && Array.isArray(S.awg.tunnels)) && String(t.type || '').toLowerCase() === 'opkgtun' && !isTrue(t.connected) && t.link !== 'up' && !vlessOf(t.name) && !awgOf(t.name);
+const tunLost = t => {
+  const modules = tunnelModuleState();
+  return !!(t && modules.vless && Array.isArray(modules.vless.tunnels) && Array.isArray(modules.tunnels)) && String(t.type || '').toLowerCase() === 'opkgtun' && !isTrue(t.connected) && t.link !== 'up' && !vlessOf(t.name) && !awgOf(t.name);
+};
 // A tunnel's line in the list: its kind and anything wrong with it; the handshake and the rest
 // are on the tunnel's own page.
 const tunSub = t => {
@@ -5399,7 +5416,10 @@ async function cfgSet(fields, okMsg, reload) {
     toast(x.ok ? (x.result === 'unchanged' ? 'Уже сохранено' : okMsg) : 'Не сохранено: ' + errText(x), null, actKey(fields));
     return x;
   } catch (e) { toast('Ошибка: ' + e.message); return null; }
-  finally { await Promise.all(['config'].concat(reload || []).map(k => load(k, true))); render(); }
+  finally {
+    const keys = fields.op === 'journal' ? reload || [] : ['config'].concat(reload || []);
+    await Promise.all([...new Set(keys)].map(k => load(k, true))); render();
+  }
 }
 const WAN_ERRORS = {
   COOLDOWN: 'между ручными действиями нужна минута', BUSY: 'идёт автоматическое восстановление связи, повторите через минуту',

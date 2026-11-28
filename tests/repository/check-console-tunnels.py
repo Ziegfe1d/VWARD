@@ -24,8 +24,9 @@ def piece(start, end):
 
 
 script = "\n".join([piece("const TUN_TYPE =", "// Switched off in Keenetic"), piece("const tunOff =", "async function tunnelOp("),
-                    piece("const vlessOf =", "\n")]) + r"""
+                    piece("const tunnelModuleState =", "\n"), piece("const vlessOf =", "\n")]) + r"""
 const isTrue = v => v === true || v === 1 || v === '1' || v === 'true';
+const current = 'vpn';
 let S = { awg: { tunnels: [{ name: 'OpkgTun0', running: true, handshake: 12 }, { name: 'OpkgTun2', running: false }], vless: { tunnels: [{ name: 'OpkgTun1', running: true }] } } };
 const st = () => ({ wg: { failopen_active: false } }), prof = () => ({ tunnel_interface: 'Wireguard0' });
 console.log(JSON.stringify([

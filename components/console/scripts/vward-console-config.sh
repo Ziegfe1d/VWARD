@@ -238,7 +238,9 @@ core_list() {
 }
 
 done_ok() {
-    [ "$2" != changed ] || rm -rf "${VWARD_CONSOLE_CACHE_DIR:-/tmp/vward-console-cache}" "${VWARD_KCACHE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic}/running-config" 2>/dev/null
+    if [ "$2" = changed ] && [ "$OP" != journal ]; then
+        rm -rf "${VWARD_CONSOLE_CACHE_DIR:-/tmp/vward-console-cache}" "${VWARD_KCACHE:-${VWARD_ROOT_PREFIX:-}/tmp/vward-keenetic}/running-config" 2>/dev/null
+    fi
     audit "$1 result=$2"; printf 'result=%s\n' "$2"; exit 0
 }
 

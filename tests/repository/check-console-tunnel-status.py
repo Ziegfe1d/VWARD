@@ -40,13 +40,15 @@ def line(start):
 
 
 code = "".join([
-    line("const isTrue = "), line("const vlessOf = "), line("const awgOf = "), line("const tunLost = "), line("const tunNow = "), line("const FO_WHY = "), line("const foText = "), grab("const tunPill = ", "];\n"), line("const tunGuardOff = "),
+    line("const isTrue = "), line("const tunnelModuleState = "), line("const vlessOf = "), line("const awgOf = "),
+    grab("const tunLost = ", "\n};\n"), line("const tunNow = "), line("const FO_WHY = "), line("const foText = "), grab("const tunPill = ", "];\n"), line("const tunGuardOff = "),
     line("const tunOff = "), line("const viaIs = "), line("const vpnDirect = "),
-    grab("function tunDupAddresses("), grab("function vpnSummary() {"), grab("function updateSummary() {"), grab("function routeSummary() {"), line("const compsOff = "), line("const compsOffUnexpected = "),
+    grab("function tunDupAddresses("), grab("function vpnSummary() {"), grab("function updateSummary() {"),
+    grab("function visibleLists() {"), grab("function routeSummary() {"), line("const compsOff = "), line("const compsOffUnexpected = "),
     grab("function notifications() {"), grab("function cardData(id) {"),
 ])
 harness = """
-let STATUS = null; const S = { errors: {}, lists: null };
+let current = 'overview', STATUS = null; const S = { errors: {}, lists: null };
 const st = () => STATUS || {}; const prof = () => ({ tunnel_interface: 'OpkgTun2' }); const plat = () => ({});
 const tunLabel = n => n; const fmtTime = t => 'T' + t; const num = v => v == null ? null : Number(v); const fmtKB = v => v; const fmtInt = v => v;
 const TUNBUSY = {}, TUNUP = {}; const TUN_BUSY = { up: 'Включение', down: 'Выключение', restart: 'Перезапуск' };
@@ -68,6 +70,9 @@ const L = (name, state) => Object.assign(T(name, false, state), { type: 'opkgtun
 out.lost = run({ interfaces: [L('OpkgTun0', 'down'), L('OpkgTun1', 'down'), L('OpkgTun2', 'down')], failopen_active: true, failopen_reason: ['silent'] });
 // A connected tunnel has its program, whatever the engines' answer (cut short by a slow Keenetic).
 out.alive = run({ interfaces: [Object.assign(L('OpkgTun3', 'up'), { connected: 'yes', link: 'up' })] }).pills;
+S.awgOverview = { ok: true, tunnels: [], vless: { tunnels: [{ name: 'OpkgTun1' }] } };
+out.summary = [tunLost(L('OpkgTun1', 'up')), tunLost(L('OpkgTun2', 'up'))];
+current = 'vpn'; out.detail = tunLost(L('OpkgTun1', 'up')); current = 'overview'; delete S.awgOverview;
 // The engines' answer missing: nothing is called lost.
 S.awg = { tunnels: [] }; out.unknown = run({ interfaces: [L('OpkgTun1', 'up')] }).pills;
 delete S.awg;
@@ -101,6 +106,8 @@ if o["lost"]["pills"] != [":Выключен", "warn:Нет настроек", "
     fail(f"a tunnel without its settings says so: {o['lost']['pills']}")
 if o["alive"] != ["ok:В сети"] or "warn:Нет настроек" in o["unknown"]:
     fail(f"a connected tunnel, or one the engines did not report on, is not «Нет настроек»: {o['alive']} {o['unknown']}")
+if o["summary"] != [False, True] or o["detail"] is not True:
+    fail("the Overview uses the module summary without replacing the VPN page's detailed state")
 if not any("настройки туннеля не найдены" in n for n in o["lost"]["notes"]):
     fail(f"the agent's switch-off of a tunnel without settings says why: {o['lost']['notes']}")
 print("CONSOLE_TUNNEL_STATUS=PASS")

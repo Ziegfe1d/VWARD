@@ -840,8 +840,8 @@ _vward_kpart_narrow()
     _vkn_out=
 }
 
-# vward_keenetic_part PART: the part through RCI when proven this boot (0), else 3 and nothing
-# printed: the caller takes the whole configuration (vward_keenetic_parts does).
+# vward_keenetic_part PART [verified]: one RCI section. With verified, a missing
+# parity result returns 3 without starting a full read to establish parity.
 vward_keenetic_part()
 {
     case "$1" in groups|dnsproxy|nameservers|iproutes) ;; *) return 2 ;; esac
@@ -850,6 +850,7 @@ vward_keenetic_part()
         _vward_kpart_narrow "$1" && return 0
         return 3
     fi
+    [ "${2:-}" != verified ] || return 3
     # First use this boot: proven against the whole configuration (the shared copy).
     mkdir -p "$VWARD_KPART" 2>/dev/null
     _vkp_n=$(_vward_kpart_narrow "$1") || return 3

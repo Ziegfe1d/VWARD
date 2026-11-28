@@ -12,7 +12,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 LIB = ROOT / "components/runtime/lib/vward-device-profile.sh"
-SHELLS = [["sh"]] + ([["busybox", "sh"]] if shutil.which("busybox") else [])
+BUSYBOX = shutil.which("busybox")
+SHELLS = [["sh"]] + ([[BUSYBOX, "sh"]] if BUSYBOX else [])
 
 FULL = """system
     hostname Viva
@@ -83,6 +84,10 @@ cat "{t}/rci/$p"
             p = t / f
             return len(p.read_text().splitlines()) if p.exists() else 0
 
+        rc, out = run("vward_keenetic_part groups verified")
+        if (rc, out) != (3, "") or count("full.log") or count("rci.log"):
+            fail(f"{sh} the Overview must not start first-use verification")
+
         # First use: proven against the whole configuration, then the narrow answer.
         rc, out = run("vward_keenetic_parts groups dnsproxy nameservers iproutes")
         for want in ("object-group fqdn domain-list4", "    include claude.ai", "    route object-group domain-list0 OpkgTun4 auto",
@@ -95,7 +100,7 @@ cat "{t}/rci/$p"
             fail(f"{sh} only the parts, each proven: {out!r}")
         whole_reads = count("full.log")
         # Proven: no whole read any more.
-        rc, out = run("vward_keenetic_part groups; vward_keenetic_part nameservers")
+        rc, out = run("vward_keenetic_part groups verified; vward_keenetic_part nameservers")
         if count("full.log") != whole_reads or "include t.me" not in out:
             fail(f"{sh} a proven part reads only its subtree")
         # The consumers' parsers see the same lines as in the whole configuration.
@@ -104,6 +109,9 @@ cat "{t}/rci/$p"
             fail(f"{sh} dns-proxy routes as the agents parse them: {a!r}")
         # RCI down: the whole configuration, once, nothing lost.
         (t / "rci-down").touch()
+        rc, out = run("vward_keenetic_part groups verified")
+        if (rc, out) != (3, "") or count("full.log") != whole_reads:
+            fail(f"{sh} an unavailable verified part must not start a full read")
         rc, out = run("vward_keenetic_parts groups nameservers")
         if out.count("object-group fqdn domain-list0") != 1 or "hostname Viva" not in out:
             fail(f"{sh} RCI down: the whole configuration once: {out!r}")
