@@ -35,23 +35,31 @@ fn = cut("function routeSummary() {")
 # The summary on a router's answer: two tunnels, the API sent 300 of 1 388 subnets.
 if shutil.which("node"):
     prog = ("const num = v => (v === '' || v == null || isNaN(+v)) ? null : +v, viaIs = (l, v) => l.via === v, compOn = id => id !== 'policy-sync';"
-            "const S = {route: {ip: {categories: 0, active_count: 0, managed_routes: 0}}, services: {enabled: [{group: 'svc1'}]}, lists: {"
+            "let current = 'routes'; const S = {loadedAt: {}, cached: {}, route: {ip: {categories: 0, active_count: 0, managed_routes: 0}}, services: {enabled: [{group: 'svc1'}]}, lists: {"
             "lists: [{name: 'l1', count: 400, via: 'vpn', route: 'OpkgTun0'}, {name: 'l2', count: 18, via: 'bypass', route: ''},"
             " {name: 'svc1', count: 50, via: 'vpn', route: 'OpkgTun0'}, {name: 'l3', count: 0, via: 'vpn', route: 'OpkgTun1', auto: {at: 'x'}}],"
             "subnet_counts: {OpkgTun0: 1388}, subnets: {OpkgTun0: new Array(300).fill('x'), OpkgTun1: ['a', 'b']}}};"
-            "const svcOf = g => (S.services.enabled || []).find(e => e.group === g);\n" + fn +
+            "const svcOf = g => (S.services.enabled || []).find(e => e.group === g);\n" + cut("function visibleLists() {") + "\n" + fn +
             "\nconst r = routeSummary(); console.log(JSON.stringify({lists: r.lists, domains: r.domains, vpn: r.vpnLists, bypass: r.bypassLists,"
             " auto: r.autoMoved, nets: r.nets, t0: r.netsOf('OpkgTun0'), t1: r.netsOf('OpkgTun1'), via0: r.listsOf('OpkgTun0').length, ip: r.ipOn}));"
-            "S.lists = null; const e = routeSummary(); console.log(JSON.stringify([e.lists, e.domains, e.nets, e.netsOf('OpkgTun0')]));")
+            "S.listsOverview = {ok: true, stale_at: 1, lists: S.lists.lists, subnet_counts: {OpkgTun0: 1388, OpkgTun1: 2}};"
+            "current = 'overview'; S.loadedAt.lists = 2000; const keepsFresh = visibleLists() === S.lists;"
+            "S.loadedAt.lists = 500; const usesSummary = visibleLists() === S.listsOverview;"
+            "const summaryNets = routeSummary().nets;"
+            "current = 'routes'; console.log(JSON.stringify([keepsFresh, usesSummary, summaryNets, visibleLists() === S.lists]));"
+            "current = 'overview'; S.lists = null; S.listsOverview = {ok: false};"
+            "const e = routeSummary(); console.log(JSON.stringify([e.lists, e.domains, e.nets, e.netsOf('OpkgTun0')]));")
     out = subprocess.run(["node", "-e", prog], capture_output=True, text=True)
     lines = out.stdout.strip().splitlines()
-    if len(lines) != 2:
-        fail(f"the summary does not run: {out.stderr[-300:]}")
+    if out.returncode or len(lines) != 3:
+        fail(f"the summary does not run: {out.stderr[:1000]}")
     want = {"lists": 3, "domains": 418, "vpn": 3, "bypass": 1, "auto": 1, "nets": 1390, "t0": 1388, "t1": 2, "via0": 2, "ip": False}
     if json.loads(lines[0]) != want:
         fail(f"the summary: {lines[0]}, want {want}")
-    if json.loads(lines[1]) != [None, None, None, None]:
-        fail(f"not loaded is unknown, never zero: {lines[1]}")
+    if json.loads(lines[1]) != [True, True, 1390, True]:
+        fail(f"only the Overview uses a summary and respects snapshot freshness: {lines[1]}")
+    if json.loads(lines[2]) != [None, None, None, None]:
+        fail(f"not loaded is unknown, never zero: {lines[2]}")
 # No place counts it itself.
 rest = JS.replace(fn, "")
 for own in ("subnet_counts", "filter(l => viaIs(l, 'vpn')).length", "filter(l => viaIs(l, 'bypass')).length", "reduce((n, l) => n + (num(l.count) || 0), 0)"):
