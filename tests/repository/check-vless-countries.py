@@ -7,6 +7,7 @@ fix.33.1: a change answers «result=changed» (it was «changedcross», which th
 failure); an answer the Panel does not know leaves its last line with the error in the journal."""
 
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -58,7 +59,8 @@ with tempfile.TemporaryDirectory() as tmp:
 
 # The failover: switched-off countries skipped, other countries only with cross.
 fo = func("op_failover")
-for need in ('fo_off=" $(countries_get "$n" off) "', '*" $(cc "$(nm "$l")") "*) continue', 'elif [ -z "$flag" ] || [ "${fo_cross:-0}" != 0 ]; then echo "$i" >> "$TMPD/other"'):
+for need in ('fo_off=" $(countries_get "$n" off) "', '!index(off, " " $5 " ")',
+             'country == "--" || cross != 0', 'fo_country=$(cc "$AP_NAME")'):
     if need not in fo:
         fail(f"failover lacks {need}")
 if "info.countries.off=" not in func("op_list") or '"$ENGINE_ETC/v$n.countries"' not in func("op_remove"):
@@ -72,7 +74,8 @@ if 'vs_out=$("$VLESS_ENGINE" countries "$2" "$3" "$4"' not in helper:
     fail("the helper must pass a country change to the engine")
 if 'RELAY_REASON=$(printf \'%s\\n\' "$vs_out" | tail -n 1' not in helper:
     fail("an unknown answer of the engine leaves its last line in the journal")
-for need in ('vless-server countries "$TNAME" "$TCC" "$TCV"', "countries: {off:"):
+for need in ('vless-server countries "$TNAME" "$TCC" "$TCV"', "countries: {off:",
+             'vless-server select $TNAME $TIDX $TREV', "revision: $revision"):
     if need not in api:
         fail(f"the API lacks {need}")
 for need in ("if (!VSRV[name]) vlessServers(name)", "'Группировать по странам'", "['ping', 'Отклик'], ['name', 'Название'], ['country', 'Страна']",
@@ -81,4 +84,21 @@ for need in ("if (!VSRV[name]) vlessServers(name)", "'Группировать �
         fail(f"the Panel lacks {need}")
 if "'Показать серверы'" in js:
     fail("the servers are shown at once, without a button first")
+if shutil.which("node"):
+    panel_test = """
+const VSRV = {OpkgTun0: {data: {revision: 'a'.repeat(64), servers: [{n: 21, name: 'TR', host: 'tr.example'}]}}};
+let tunOverlay, request, result, refreshed = false;
+function tunLabel(name) { return name; }
+function tunOverlayShow(value) { result = value; }
+async function runJob(fields) { request = fields; return {ok: false, code: 'server_list_changed'}; }
+async function load() {}
+async function vlessServers() { refreshed = true; }
+""" + re.search(r"^async function vlessSelect\(.*?^\}", js, re.S | re.M).group(0) + """
+vlessSelect('OpkgTun0', '21').then(() => {
+  if (request.revision !== 'a'.repeat(64) || request.server !== '21' ||
+      result.ok || !result.text.includes('Список серверов изменился') || !refreshed) process.exit(1);
+});
+"""
+    if subprocess.run(["node", "-e", panel_test]).returncode != 0:
+        fail("a stale manual selection must carry the displayed revision and refresh with a specific message")
 print("VLESS_COUNTRIES=PASS")

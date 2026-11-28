@@ -902,6 +902,10 @@ function logEntry(raw) {
     const event = parts[0] || '';
     const attempted = /^restart_attempted (OpkgTun[0-9])(?: on its adapter)?$/.exec(event);
     const started = /^started (OpkgTun[0-9]) by request$/.exec(event);
+    const country = /^failover (OpkgTun[0-9]): applied server country could not be verified, current server kept$/.exec(event);
+    if (country) return { t: t, src: src, code: code,
+      text: 'Не удалось определить страну действующего VPN-сервера. Сервер сохранён.',
+      more: ['Туннель ' + country[1]].concat(parts.slice(1).map(logField), more), level: 'warn' };
     if (attempted || started) {
       const tun = (attempted || started)[1];
       return { t: t, src: src, code: code,
@@ -4301,7 +4305,7 @@ const jobLast = out => { const l = String(out || '').trim().split('\n'); return 
 async function runJob(fields, minutes) {
   let x;
   try { x = await apiPost('tunnel-conf', fields); } catch (e) { return { ok: false, text: 'Ошибка: ' + e.message }; }
-  if (!x.ok) return { ok: false, text: errText(x) };
+  if (!x.ok) return { ok: false, code: x.error, text: errText(x) };
   const deadline = Date.now() + minutes * 60 * 1000;
   let run = {};
   while (Date.now() < deadline) {
@@ -4584,7 +4588,8 @@ function vlessServersPanel(name) {
         (open ? '<ul class="rows">' + vSort(g).map(s => vRow(name, s, isOff && !s.current)).join('') + '</ul>' : '') + '</div>';
     }).join('');
   }
-  return panel('Серверы', view + body + head,
+  const currentNote = all.length && !d.current ? '<p class="result-note">Текущий сервер не удалось сопоставить со списком подписки.</p>' : '';
+  return panel('Серверы', view + currentNote + body + head,
     { beta: true, desc: 'Нажмите на сервер, чтобы подключиться. Выключенную страну VWARD сам не выбирает.' });
 }
 async function vlessCountry(name, code, on) {
@@ -4605,11 +4610,17 @@ async function vlessServers(name, fresh) {
   render();
 }
 async function vlessSelect(name, n) {
-  const s = ((VSRV[name] && VSRV[name].data && VSRV[name].data.servers) || []).find(x => String(x.n) === String(n));
+  const d = VSRV[name] && VSRV[name].data;
+  const s = ((d && d.servers) || []).find(x => String(x.n) === String(n));
+  if (!s || !d.revision) { await vlessServers(name); return; }
   tunOverlay = null;
-  tunOverlayShow({ head: 'Смена сервера', okHead: 'Сервер сменён', failHead: 'Сервер не ответил', sub: s ? s.name || s.host : '', step: 'program' });
-  const r = await runJob({ op: 'server', name: name, server: String(n) }, 2);
-  tunOverlayShow({ done: true, ok: r.ok, open: '', stage: r.ok ? tunLabel(name) : '', text: r.ok ? 'Туннель подключён к новому серверу.' : r.code === 'server_unreachable' ? 'Сервер не ответил, туннель остался на прежнем.' : r.text });
+  tunOverlayShow({ head: 'Смена сервера', okHead: 'Сервер сменён', failHead: 'Смена сервера не выполнена', sub: s.name || s.host, step: 'program' });
+  const r = await runJob({ op: 'server', name: name, server: String(n), revision: d.revision }, 2);
+  const result = r.ok ? 'Туннель подключён к новому серверу.' :
+    r.code === 'server_list_changed' ? 'Список серверов изменился. Выбери сервер в обновлённом списке.' :
+    r.code === 'server_unreachable' ? 'Сервер не ответил, туннель вернулся к прежнему.' :
+    r.code === 'rollback_failed' ? 'Не удалось восстановить прежний сервер. Проверь состояние туннеля.' : r.text;
+  tunOverlayShow({ done: true, ok: r.ok, open: '', stage: r.ok ? tunLabel(name) : '', text: result });
   await Promise.all([load('status', true), load('awg', true)]);
   await vlessServers(name);
 }

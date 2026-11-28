@@ -61,6 +61,7 @@ diagnostics = [
     ("POLICY_SCAN_ABORT|signal=TERM", "Проверка IP-категорий прервана", "warn"),
     ("POLICY_SCAN_ABORT|reason=summary_unconfirmed", "Проверка IP-категорий остановлена. Итог скана не подтверждён", "warn"),
     ("SKIPPED_TUNNEL_DOWN|health=none", "Проверка IP-категорий пропущена. Доступность VPN не подтверждена", "warn"),
+    ("VLESS_ENGINE|failover OpkgTun0: applied server country could not be verified, current server kept", "Не удалось определить страну действующего VPN-сервера. Сервер сохранён.", "warn"),
     ("duration=1785s|targets=538|checked=538|ok=23", "Проверка IP-категорий завершена. Проверено 538 из 538", "ok"),
     ("duration=14s|targets=538|checked=2", "Проверка IP-категорий выполнена частично. Проверено 2 из 538", "warn"),
 ]

@@ -37,7 +37,8 @@ with tempfile.TemporaryDirectory() as tmp:
     # with Keenetic's grep first in its own fixed PATH (a disposable copy of the script).
     bb = shutil.which("busybox") or fail("busybox is needed (the router's grep)")
     bbdir = tmp / "keenetic-bin"; bbdir.mkdir()
-    (bbdir / "grep").symlink_to(bb)
+    for applet in ("awk", "cmp", "dd", "grep", "ln", "mktemp", "sed", "sha256sum"):
+        (bbdir / applet).symlink_to(bb)
     engine_src = ENGINE.read_text()
     if engine_src.count("PATH=/opt/bin:") != 1:
         fail("the engine's fixed PATH changed")
@@ -407,6 +408,49 @@ esac
         fail("the new server is recorded")
     if (tmp / "xray.addr").read_text().strip() != "203.0.113.13" or "now server 3 203.0.113.13:443" not in (tmp / "engine.log").read_text():
         fail("the new server runs and is logged")
+    # A provider can put a different country at the saved index without changing Xray.
+    # The old install must identify the applied configuration without trusting that index.
+    applied = etc / f"v{sn}.applied"
+    if applied.stat().st_mode & 0o777 != 0o600:
+        fail("applied metadata must be root-only")
+    applied.unlink(missing_ok=True)
+    before_reorder = (tmp / "sub").read_text()
+    original = base64.b64decode(before_reorder).decode().splitlines()
+    original_revision = next(x.split("=", 1)[1] for x in engine("list", tn) if x.startswith("info.revision="))
+    applied_config = etc / f"v{sn}.json"
+    previous_config = applied_config.read_bytes()
+    previous_starts = (tmp / f"starts/v{sn}").read_bytes()
+    (tmp / "sub").write_text(base64.b64encode("\n".join([original[2], original[0], original[1]]).encode()).decode())
+    out = engine("list", tn, "fresh")
+    if "info.current=1" not in out or not any("203.0.113.13|443||1|" in row for row in out):
+        fail(f"the active row follows the applied profile after a reorder: {out}")
+    status = next(row for row in engine("status") if row.startswith(f"tunnel={tn}\t"))
+    if not status.endswith("DE-2") or "\t203.0.113.13:443\t" not in status:
+        fail(f"status combines name and endpoint of the applied profile: {status}")
+    if engine("select", tn, "3", original_revision) != ["error=server_list_changed"]:
+        fail("a click from a stale list can no longer select another profile")
+    if applied_config.read_bytes() != previous_config or (tmp / f"starts/v{sn}").read_bytes() != previous_starts:
+        fail("a stale pick must not change Xray")
+    # If the active DE profile disappears and a responding US server occupies its old
+    # index, the proven DE country still applies and the old config stays selected.
+    without_de = [original[2].replace("sni=s.example", "sni=another.example"), original[1]]
+    (tmp / "sub").write_text(base64.b64encode("\n".join(without_de).encode()).decode())
+    if engine("countries", tn, "DE", "0")[-1] != "result=changed":
+        fail("disable the same-country candidates for this fixture")
+    out = engine("failover", tn)
+    if out != ["info.failover=none", "result=unchanged"] or (tmp / f"starts/v{sn}").read_bytes() != previous_starts:
+        fail(f"cross=0 and disabled country: no foreign candidate and no restart: {out}")
+    if "info.current=0" not in engine("list", tn) or not next(row for row in engine("status") if row.startswith(f"tunnel={tn}\t")).endswith("DE-2"):
+        fail("same host but different Xray profile is not the applied server")
+    applied.unlink()
+    if engine("failover", tn) != ["info.failover=country_unknown", "result=unchanged"]:
+        fail("a legacy config missing from the list cannot inherit a country from the old row")
+    engine("countries", tn, "DE", "1")
+    (tmp / "sub").write_text(before_reorder)
+    recovered = engine("list", tn, "fresh")
+    current_revision = next(x.split("=", 1)[1] for x in recovered if x.startswith("info.revision="))
+    if len(current_revision) != 64:
+        fail("missing opaque list revision")
     # The servers as the VPN apps show them: name with the flag, address, time to connect from the
     # router (none: no answer), the one in use; never the id or the subscription's address.
     (tmp / "reach.203.0.113.11").write_text(""); (tmp / "reach.203.0.113.13").write_text("")
@@ -427,7 +471,7 @@ esac
         fail("a look at the list fetches the subscription again")
     (tmp / "sub").write_text(_sub)
     # Chosen in the Panel: the tunnel moves when the server answers, else it stays where it was.
-    out = engine("select", tn, "2")
+    out = engine("select", tn, "2", current_revision)
     if out != ["info.server=2", "info.host=203.0.113.12:443", "result=changed"] or (etc / f"v{sn}.idx").read_text().strip() != "2":
         fail(f"select server 2: {out}")
     out = engine("select", tn, "1")
@@ -437,6 +481,26 @@ esac
         time.sleep(0.1)
     if out != ["error=server_unreachable"] or (etc / f"v{sn}.idx").read_text().strip() != "2" or (tmp / "xray.addr").read_text().strip() != "203.0.113.12":
         fail(f"a silent server chosen: the tunnel stays on its own: {out}")
+    applied_backup = applied.read_bytes()
+    previous_config = applied_config.read_bytes()
+    applied.unlink()
+    applied.mkdir()
+    out = engine("select", tn, "3")
+    applied.rmdir()
+    applied.write_bytes(applied_backup)
+    if out != ["error=write_failed"] or applied_config.read_bytes() != previous_config or "info.current=2" not in engine("list", tn):
+        fail(f"metadata write failure must restore the original Xray config and choice: {out}")
+    pending = subprocess.Popen(["sh", str(ENGINE), "select", tn, "1"], env=env, text=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    for _ in range(100):
+        if applied_config.read_bytes() != previous_config or pending.poll() is not None:
+            break
+        time.sleep(0.05)
+    staged = applied_config.read_bytes() != previous_config
+    pending.terminate()
+    pending.communicate(timeout=25)
+    if not staged or pending.returncode != 130 or applied_config.read_bytes() != previous_config or (run_ / f"v{sn}.failover").exists():
+        fail("an interrupted attempt must restore the previous config and release the switch lock")
     if engine("select", tn, "9") != ["error=invalid_value"] or engine("select", tn, "x") != ["error=invalid_value"]:
         fail("a server that is not in the subscription")
     out = engine("select", tn, "3")

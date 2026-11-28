@@ -3386,7 +3386,7 @@ tunnel_summary() {
 }
 
 # op_vless_server servers|select NAME [I]: the servers of a VLESS tunnel's subscription (name,
-# address, time to answer, which one now), or the move of the tunnel to server I.
+# address, time to answer, which one now), or the move to server I of a displayed revision.
 op_vless_server() {
     [ -x "$VLESS_ENGINE" ] || die engine_unavailable
     case "$2" in OpkgTun[0-9]) ;; *) die invalid_tunnel 64 ;; esac
@@ -3397,13 +3397,17 @@ op_vless_server() {
         countries) case "$3:$4" in cross:0|cross:1|--:0|--:1|[A-Z][A-Z]:0|[A-Z][A-Z]:1) ;; *) die invalid_value 64 ;; esac
                 vs_out=$("$VLESS_ENGINE" countries "$2" "$3" "$4" 2>/dev/null) ;;
         select) case "$3" in ''|*[!0-9]*) die invalid_value 64 ;; esac
+                case "${4:-}" in *[!0-9a-f]*) die invalid_value 64 ;; esac
+                [ -z "$4" ] || [ "${#4}" = 64 ] || die invalid_value 64
                 load_profile_base
-                vs_out=$("$VLESS_ENGINE" select "$2" "$3" 2>/dev/null) ;;
+                vs_out=$("$VLESS_ENGINE" select "$2" "$3" ${4:+"$4"} 2>/dev/null) ;;
         *) die invalid_operation 64 ;;
     esac
     case "$(printf '%s\n' "$vs_out" | tail -n 1)" in
         result=checked) printf '%s\n' "$vs_out" | grep '^info\.'; done_ok "vless-server servers $2" checked ;;
-        result=changed) printf '%s\n' "$vs_out" | grep '^info\.'; done_ok "vless-server $1 $2 $3 ${4:-}" changed ;;
+        result=changed) printf '%s\n' "$vs_out" | grep '^info\.'
+                        if [ "$1" = select ]; then done_ok "vless-server $1 $2 $3" changed
+                        else done_ok "vless-server $1 $2 $3 ${4:-}" changed; fi ;;
         error=*) relay_reason "$vs_out"
                  vs_err=$(printf '%s\n' "$vs_out" | sed -n 's/^error=//p' | tail -n 1)
                  case "$vs_err" in ''|*[!a-z0-9_]*) vs_err=engine_failed ;; esac
