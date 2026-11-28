@@ -50,6 +50,7 @@ if "Автоподбор:" in al or al.count('class="log-e') != 5:
 # Boot DNS rules and nightly scan: counts are observed, and only an actual
 # outcome may render completion. A control query can fail with all rules loaded.
 diagnostics = [
+    ("START_DEFERRED", "При запуске Entware автоподбор передан агенту компонентов", "info"),
     ("DNS_RULES|result=mismatch|config=16|live=1|reapplied=15", "Активно 1 из 16 правил DNS через VPN. Keenetic принял 15 повторно поданных правил", "warn"),
     ("DNS_RULES|result=ok|config=16|live=16|resolves=yes", "Активно 16 из 16 правил DNS через VPN", "ok"),
     ("DNS_RULES|result=ok|config=16|live=16|resolves=no", "Активно 16 из 16 правил DNS через VPN. Контрольный запрос не вернул IPv4-адрес", "warn"),

@@ -848,6 +848,7 @@ const LOG_CODES = {
   HINT_SKIP_RU_ZONE: 'Российский домен: не через VPN', HINT_AGH_BLOCKED: 'Подсказка: домен блокирует AdGuard Home', HINT_SKIP_ADAPTIVE_OFF: 'Подсказка: автоподбор выключен',
   CONSOLE_CONFIG: 'Настройки Панели VWARD изменены', START: 'Автоподбор запущен', STOP: 'Автоподбор остановлен', STOP_REQUEST: 'Остановка по запросу',
   WATCHDOG_RESTART: 'Перезапуск после сбоя', WATCHDOG_CORES_TRANSIENT: 'Второй процесс исчез сам, перезапуск не нужен', START_FAILED: 'Запуск не удался', START_SLOW: 'Медленный запуск, дождались',
+  START_DEFERRED: 'При запуске Entware автоподбор передан агенту компонентов',
   PERSIST_RESTORE_OK: 'AdaptiveAuto восстановлен', PERSIST_RESTORE_PARTIAL: 'AdaptiveAuto восстановлен не полностью', PERSIST_RESTORE_LOCK_FAIL: 'Восстановление AdaptiveAuto отложено: изменения заняты',
   PERSIST_RESTORE_FAIL: 'Keenetic отклонил команду восстановления', PERSIST_RESTORE_SKIP_INVALID: 'Имя пропущено: Keenetic его не примет', PERSIST_MISSING_START: 'Сохранённого AdaptiveAuto нет',
   ADAPTIVE_RU_OUT: 'Российские домены выведены из VPN', AUTO_VPN: 'Через VPN (автоподбор)', AUTO_DIRECT_MAINT: 'Снова напрямую', VPN_OK: 'Открывается через VPN', VPN_OK_RETRY: 'Открывается через VPN',

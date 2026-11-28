@@ -3,6 +3,31 @@
 PATH=/opt/bin:/opt/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+EVENT_LOG="/opt/var/log/vward-route-engine-events.log"
+
+# Entware starts S91 before S92/S93. Device discovery and the route-engine health
+# wait belong to the supervisor on this path, so one slow start cannot hold the
+# init chain before VPN supervision and the Panel. Direct callers still wait.
+entware_start()
+{
+    RE_INITD=${VWARD_INITD:-/opt/etc/init.d}
+    [ -x "$RE_INITD/S92vward-runtime" ] || return 1
+    case "$0" in "$RE_INITD/rc.unslung"|./rc.unslung|rc.unslung) return 0 ;; esac
+    [ -n "${PPID:-}" ] || return 1
+    { tr '\000' '\n' < "/proc/$PPID/cmdline"; } 2>/dev/null | awk -v init="$RE_INITD/rc.unslung" '
+        NR <= 3 && ($0 == init || $0 == "./rc.unslung" || $0 == "rc.unslung") {
+            if (getline && $0 == "start") ok = 1
+            exit
+        }
+        NR >= 3 {exit}
+        END {exit !ok}'
+}
+
+if [ "${1:-}" = start ] && entware_start; then
+    { printf '%s|START_DEFERRED\n' "$(date '+%Y-%m-%d %H:%M:%S')" >> "$EVENT_LOG"; } 2>/dev/null || :
+    return 0 2>/dev/null || exit 0
+fi
+
 VWARD_PROFILE_LIB=${VWARD_PROFILE_LIB:-/opt/lib/vward/vward-device-profile.sh}
 [ -r "$VWARD_PROFILE_LIB" ] || exit 1
 . "$VWARD_PROFILE_LIB"
@@ -21,7 +46,6 @@ SCRIPT="/opt/bin/vward-route-engine.sh"
 DNSCAP=${VWARD_DNSCAP_BIN:-/opt/share/vward/dnscap/vward-dnscap}
 SENTINEL_CTL=${VWARD_SENTINEL_CTL:-/opt/bin/vward-sentinel.sh}
 LOG="/opt/var/log/vward-route-engine.log"
-EVENT_LOG="/opt/var/log/vward-route-engine-events.log"
 UNHEALTHY=""
 
 LIVE_LOCK="/tmp/vward-route-engine.lock"
